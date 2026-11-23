@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.1.0',
+  version: '1.2.0',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -511,15 +511,28 @@ function memory() {
 }
 const aiKey = () => ls.get('by.aiKey') || ls.get('mg.aiKey') || '';
 
-/** Makes this month's copy of every monthly item (once), waiting for you to confirm the amount. */
+/* Repeating items: every 1, 3, 6 or 12 months, counted from startMonth (the first / next month it is due). */
+const EVERY = { 1: 'Every month', 3: 'Every 3 months', 6: 'Every 6 months', 12: 'Every year' };
+const EVERY_SHORT = { 1: 'Monthly', 3: 'Quarterly', 6: 'Half-yearly', 12: 'Yearly' };
+const monthsBetween = (a, b) => { const [ay, am] = a.split('-').map(Number), [by, bm] = b.split('-').map(Number); return (by - ay) * 12 + (bm - am); };
+const addMonths = (k, n) => { const [y, m] = k.split('-').map(Number), t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${pad2(t % 12 + 1)}`; };
+const isDue = (t, m) => { const s = t.startMonth || m; return m >= s && monthsBetween(s, m) % (+t.every || 1) === 0; };
+function nextDue(t, from = thisMonth()) {
+  const s = t.startMonth || from, e = +t.every || 1;
+  if (from <= s) return s;
+  return addMonths(s, Math.ceil(monthsBetween(s, from) / e) * e);
+}
+const everySelect = (name, v, extra = '') => `<select ${name} ${extra}>${Object.entries(EVERY).map(([k, l]) => `<option value="${k}" ${+k === (+v || 1) ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+
+/** Makes this month's copy of every repeating item that is due (once), waiting for you to confirm the amount. */
 function ensureMonthly() {
   if (!S.data) return;
-  const m = thisMonth(), need = S.data.monthly.filter(t => t.active !== false && (t.startMonth || '') <= m &&
+  const m = thisMonth(), need = S.data.monthly.filter(t => t.active !== false && isDue(t, m) &&
     !S.data.expenses.some(x => x.monthlyId === t.id && mk(x.date) === m));
   if (!need.length) return;
   mutate(d => {
     for (const t of d.monthly) {
-      if (t.active === false || (t.startMonth || '') > m || d.expenses.some(x => x.monthlyId === t.id && mk(x.date) === m)) continue;
+      if (t.active === false || !isDue(t, m) || d.expenses.some(x => x.monthlyId === t.id && mk(x.date) === m)) continue;
       d.expenses.push({ id: uuid(), date: `${m}-01`, projectId: t.projectId || null, label: t.label || '', category: t.category, reason: t.reason, vendor: t.vendor || '',
         amount: t.amount, currency: d.settings.currency, bills: [], claimId: null, monthlyId: t.id, pending: true, createdAt: isoNow() });
     }
@@ -585,7 +598,7 @@ function welcomeView() {
     <h1>Billy</h1>
     <p>${again ? 'Your Microsoft sign-in has expired. Sign in again to continue — your data is safe in OneDrive.' :
       'Snap a bill and Billy works out what it was for. Every expense, by project, ready as a monthly claim for accounts.'}</p>
-    <div class="feat"><div>📸 Reads bills &amp; tickets</div><div>📁 By project</div><div>🔁 Monthly items pre-filled</div><div>📤 Excel + bills PDF for accounts</div></div>
+    <div class="feat"><div>📸 Reads bills &amp; tickets</div><div>📁 By project</div><div>🔁 Monthly &amp; yearly items pre-filled</div><div>📤 Excel + bills PDF for accounts</div></div>
     <div class="acts">
       <button class="btn" data-a="signin">Sign in with Microsoft</button>
       ${again ? `<button class="btn sec" data-a="signin-other">Use a different account</button>` : `<button class="btn sec" data-a="demo">Look around with sample data</button>`}
@@ -655,16 +668,16 @@ function homeView() {
       ${open.length ? `<button class="btn cta" data-a="send-open">📧 Send ${esc(monthLabel(periodOf(open).month).split(' ')[0])} expenses to ${esc(firstName())}</button>
       <button class="linkbtn" data-a="new-claim" style="color:#FFC2A8;display:block;margin:8px auto 0">Choose which ones first</button>` : ''}
     </div>
-    ${pending.length ? `<div class="card"><h3>🔁 Monthly items · ${monthLabel(m)}</h3>
-      <div class="small muted" style="margin:-4px 0 8px">Filled in with last month's amounts. Tap one to change the amount or attach the bill.</div>
+    ${pending.length ? `<div class="card"><h3>🔁 Due in ${monthLabel(m)}</h3>
+      <div class="small muted" style="margin:-4px 0 8px">Your repeating items, filled in with the last amount. Tap one to change the amount or attach the bill.</div>
       <div class="list" style="margin-top:0">${pending.map(x => `<div class="row" style="padding:10px 12px">
         <span class="ic cat">${catIcon(x.category)}</span>
-        <button class="main" data-a="open-exp" data-id="${x.id}" style="border:0;background:none;text-align:left;padding:0"><span class="t">${esc(x.label || x.reason)}</span><span class="s">${esc(x.reason)}</span></button>
+        <button class="main" data-a="open-exp" data-id="${x.id}" style="border:0;background:none;text-align:left;padding:0"><span class="t">${esc(x.label || x.reason)}</span><span class="s">${(t => t && +t.every > 1 ? EVERY_SHORT[t.every] + ' · ' : '')(S.data.monthly.find(t => t.id === x.monthlyId))}${esc(x.reason)}</span></button>
         <span class="amt">${moneyS(+x.amount || 0)}</span>
         <button class="chip good" data-a="confirm" data-id="${x.id}" style="border:0;padding:7px 11px;font-size:13px">✓</button></div>`).join('')}</div>
       ${pending.length > 1 ? `<button class="btn sec" data-a="confirm-all" style="margin-top:10px">✓ Confirm all ${pending.length} · ${moneyS(sum(pending))}</button>` : ''}</div>` : ''}
     ${!learnedAny && !S.demo && ls.get('by.learnSkip') !== '1' ? `<div class="card" style="border-color:var(--acc)"><h3>🧠 Learn from your past sheets</h3>
-      <div class="small muted">Billy can read the monthly expense sheets you sent before (in ${esc(PAST_FOLDER.split('/').slice(-2).join(' › '))}) to learn your projects, categories and the items that repeat every month.</div>
+      <div class="small muted">Billy can read the monthly expense sheets you sent before (in ${esc(PAST_FOLDER.split('/').slice(-2).join(' › '))}) to learn your projects, categories and the items that repeat every month or year.</div>
       <div class="actions"><button class="btn" data-a="learn">Read past sheets</button><button class="btn sec" data-a="learn-skip">Not now</button></div></div>` : ''}
     ${cats.length ? `<div class="card"><h3>${monthLabel(m)} by category</h3>
       ${cats.slice(0, 6).map(([c, v]) => `<div style="margin-top:10px"><div style="display:flex;justify-content:space-between;font-size:14px"><span>${catIcon(c)} ${esc(c)}</span><b class="num">${moneyS(v)}</b></div><div class="pbar"><i style="width:${Math.max(3, v / catMax * 100)}%"></i></div></div>`).join('')}</div>` : ''}
@@ -705,7 +718,7 @@ function projectsView() {
       <span class="main"><span class="t">${esc(p.name)}${p.archived ? ' <span class="chip">Archived</span>' : ''}</span><span class="s">${s.n ? `${plural(s.n, 'expense')} · last ${shortDate(s.last)}` : 'No expenses yet'}</span></span>
       <span class="r"><span class="a amt">${moneyS(s.total)}</span>${s.open ? `<span class="b"><span class="chip acc">${moneyS(s.open)} to claim</span></span>` : ''}</span></button>`).join('') || '<div class="empty">No projects yet.</div>'}
       ${loose.length ? `<button class="row" data-a="open-proj" data-id="">
-        <span class="ic">🗂️</span><span class="main"><span class="t">No project</span><span class="s">Monthly items, office and personal allowances</span></span>
+        <span class="ic">🗂️</span><span class="main"><span class="t">No project</span><span class="s">Repeating items, office and personal allowances</span></span>
         <span class="r"><span class="a amt">${moneyS(sum(loose))}</span></span></button>` : ''}</div>
     <div class="actions"><button class="btn sec" data-a="new-proj">＋ New project</button><button class="btn sec" data-a="toggle-arch">${showArch ? 'Hide archived' : 'Show archived'}</button></div>`;
 }
@@ -735,7 +748,7 @@ function claimsView() {
   return `
     <div class="card" style="border-color:var(--acc)"><h3>Ready to claim</h3>
       <div class="claimcard" style="margin:0;border:0;padding:0;background:none"><div class="top"><span class="sum">${money(sum(open))}</span><span class="muted small">${plural(open.length, 'expense')}</span></div></div>
-      ${pending.length ? `<div class="note warn">${plural(pending.length, 'monthly item')} still to confirm — they're left out until you confirm them.</div>` : ''}
+      ${pending.length ? `<div class="note warn">${plural(pending.length, 'repeating item')} still to confirm — they're left out until you confirm them.</div>` : ''}
       <button class="btn" data-a="send-open" style="margin-top:12px" ${open.length ? '' : 'disabled'}>📧 Send to ${esc(firstName())}</button>
       <button class="btn sec" data-a="new-claim" style="margin-top:8px" ${open.length ? '' : 'disabled'}>Choose which ones first</button>
     </div>
@@ -768,10 +781,10 @@ function settingsView() {
       <label class="field"><span>Google Client ID ${s.googleClientId ? '· ✓ set' : ''}</span><input data-set="googleClientId" value="${esc(s.googleClientId)}" placeholder="….apps.googleusercontent.com" autocapitalize="off" spellcheck="false"></label>
       <button class="linkbtn" data-a="gmail-help" style="margin-top:6px">How to get the Client ID (once, 5 minutes)</button>
     </div>
-    <div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">🔁 Monthly items<span class="grow"></span><button class="linkbtn" data-a="monthly-new" style="text-transform:none;letter-spacing:0">＋ Add</button></h3>
-      <div class="small muted" style="padding:0 14px">Billy adds these at the start of every month with the last amount, for you to confirm.</div>
+    <div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">🔁 Repeating items<span class="grow"></span><button class="linkbtn" data-a="monthly-new" style="text-transform:none;letter-spacing:0">＋ Add</button></h3>
+      <div class="small muted" style="padding:0 14px">Monthly, quarterly or yearly. Billy adds each one in the month it's due, with the last amount, for you to confirm.</div>
       <div class="list" style="border:0;border-radius:0;margin-top:8px">${mon.map(t => `<button class="row" data-a="monthly-edit" data-id="${t.id}" style="${t.active === false ? 'opacity:.5' : ''}">
-        <span class="ic cat">${catIcon(t.category)}</span><span class="main"><span class="t">${esc(t.label || t.reason)}</span><span class="s">${esc(t.reason)}${t.active === false ? ' · paused' : ''}</span></span><span class="amt">${moneyS(+t.amount || 0)}</span></button>`).join('') || '<div class="empty" style="padding:16px">None yet. Phone bill, rent, school fees and subscriptions go here.</div>'}</div></div>
+        <span class="ic cat">${catIcon(t.category)}</span><span class="main"><span class="t">${esc(t.label || t.reason)}</span><span class="s">${EVERY_SHORT[+t.every || 1]}${+t.every > 1 ? ' · next ' + monthShort(nextDue(t)) : ''} · ${esc(t.reason)}${t.active === false ? ' · paused' : ''}</span></span><span class="amt">${moneyS(+t.amount || 0)}</span></button>`).join('') || '<div class="empty" style="padding:16px">None yet. Phone bill, rent, school fees and subscriptions go here — monthly or yearly.</div>'}</div></div>
     <div class="card"><h3>🧠 Smart bill reading</h3>
       <div class="small muted">Billy always reads bills on your phone. For sharper results — and better guesses of the project and reason — add a free Google Gemini key (aistudio.google.com). ${keyFrom === 'My Gold' ? '<b>Using the key you saved in My Gold.</b>' : ''} The key stays on this device.</div>
       <div class="field"><span>AI key ${keyFrom === 'Billy' ? '· ✓ saved' : ''}</span><input id="aiKey" type="password" autocomplete="off" autocapitalize="off" placeholder="${key ? '•••••••• (saved)' : 'Paste Gemini key'}"></div>
@@ -834,7 +847,7 @@ function openExpense(id) {
       ${x.vendor ? `<dt>Vendor</dt><dd>${esc(x.vendor)}</dd>` : ''}
       ${x.days ? `<dt>Days</dt><dd>${x.days} × ${moneyS(+x.rate || 0)}</dd>` : ''}
       ${c ? `<dt>Claim</dt><dd>${esc(c.title)}</dd>` : ''}
-      ${x.monthlyId ? `<dt>Repeats</dt><dd>Every month</dd>` : ''}
+      ${x.monthlyId ? `<dt>Repeats</dt><dd>${(t => t ? EVERY[+t.every || 1] : 'Yes')(S.data.monthly.find(t => t.id === x.monthlyId))}</dd>` : ''}
     </dl>${x.reason ? `<div style="margin-top:12px;font-size:15px">${esc(x.reason)}</div>` : ''}</div>
     <div class="card"><h3>Bills</h3><div class="bills">
       ${x.bills.map((b, i) => `<button class="g" data-a="view-bill" data-id="${x.id}" data-i="${i}" style="${b.thumb ? `background-image:url('${tu(b.thumb)}')` : ''}">${b.thumb ? '' : `<span><span class="pdf">📄</span>${esc((b.ext || 'PDF').toUpperCase())}</span>`}</button>`).join('')}
@@ -854,7 +867,7 @@ let F = null;   // the form being edited
 function newForm(from = {}) {
   const recent = recentProjects()[0];
   return { id: null, date: todayStr(), projectId: from.projectId ?? (S.f.lastProject ?? recent?.id ?? null), label: '', category: '', reason: '', vendor: '',
-    amount: '', currency: base(), origAmount: '', fx: null, days: '', rate: st().dayRate || 50, bills: [], add: [], removed: [], touched: new Set(), scan: null, repeat: false, ...from };
+    amount: '', currency: base(), origAmount: '', fx: null, days: '', rate: st().dayRate || 50, bills: [], add: [], removed: [], touched: new Set(), scan: null, repeatEvery: '0', ...from };
 }
 function openForm(id, preset = {}) {
   const x = id ? S.data.expenses.find(e => e.id === id) : null;
@@ -894,7 +907,7 @@ function formHtml() {
     <div class="field"><span>Category</span><div class="pills">${cats.map(c => `<button type="button" data-a="pick-cat" data-k="${esc(c.name)}" class="${F.category === c.name ? 'on' : ''}">${c.icon} ${esc(c.name)}</button>`).join('')}</div></div>
     <label class="field"><span>Description / reason</span><textarea name="reason" rows="2" placeholder="e.g. Music licence for the brand film">${esc(F.reason)}</textarea></label>
     <label class="field"><span>Vendor / shop <span class="faint" style="font-weight:500">(optional)</span></span><input name="vendor" value="${esc(F.vendor)}" placeholder="e.g. Artlist, Careem, ENOC"></label>
-    ${F.monthlyId ? '' : `<label style="display:flex;gap:10px;align-items:center;margin-top:14px;font-weight:600"><input type="checkbox" name="repeat" ${F.repeat ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--acc)"> Repeat every month <span class="faint small" style="font-weight:500">(phone, rent, school…)</span></label>`}
+    ${F.monthlyId ? '' : `<label class="field"><span>Repeats <span class="faint" style="font-weight:500">(phone, rent, school fees, subscriptions…)</span></span><select name="repeatEvery"><option value="0">Doesn't repeat</option>${Object.entries(EVERY).map(([k, l]) => `<option value="${k}" ${F.repeatEvery === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>`}
     <button class="btn" data-a="save-exp" style="margin-top:18px">${F.id ? 'Save changes' : 'Save expense'}</button>
     ${F.id ? '' : `<button class="btn sec" data-a="save-exp" data-more="1" style="margin-top:8px">Save and add another</button>`}`;
 }
@@ -910,7 +923,6 @@ function readForm() {
   if (!sheetEl || !F) return;
   for (const el of sheetEl.querySelectorAll('[name]')) {
     if (el.type === 'file') continue;
-    if (el.name === 'repeat') { F.repeat = el.checked; continue; }
     F[el.name] = el.value;
   }
   if (F.fx !== null && F.fx !== '' && typeof F.fx === 'string') F.fx = num(F.fx) || null;
@@ -985,7 +997,7 @@ async function saveForm(btn, more) {
       uploaded.push(await saveBill(F.add[i].file, rec));
     }
     if (S.demo) uploaded.forEach((b, i) => { if (!b.thumb && F.add[i].thumb) b.thumb = F.add[i].thumb; });
-    const id = F.id || uuid(), removed = F.removed.slice(), repeat = F.repeat && !F.monthlyId, keepBills = F.bills;
+    const id = F.id || uuid(), removed = F.removed.slice(), repeat = +F.repeatEvery > 0 && !F.monthlyId ? +F.repeatEvery : 0, keepBills = F.bills;
     const ok = await mutate(d => {
       let x = d.expenses.find(e => e.id === id);
       if (!x) { x = { id, bills: [], claimId: null, createdAt: isoNow() }; d.expenses.push(x); }
@@ -994,7 +1006,7 @@ async function saveForm(btn, more) {
       if (x.pending) delete x.pending;
       if (x.claimId) { const c = d.claims.find(c => c.id === x.claimId); if (c && !c.sentAt) { c.stale = true; c.total = round2(c.expenseIds.reduce((a, eid) => a + (+d.expenses.find(e => e.id === eid)?.amount || 0), 0)); } }
       if (repeat) {
-        const t = { id: uuid(), label: rec.label || projectById(rec.projectId)?.name || '', projectId: rec.projectId, category: rec.category, reason: rec.reason, vendor: rec.vendor, amount: rec.amount, active: true, startMonth: mk(rec.date) };
+        const t = { id: uuid(), label: rec.label || projectById(rec.projectId)?.name || '', projectId: rec.projectId, category: rec.category, reason: rec.reason, vendor: rec.vendor, amount: rec.amount, active: true, every: repeat, startMonth: mk(rec.date) };
         d.monthly.push(t); x.monthlyId = t.id;
       }
       if (x.monthlyId) { const t = d.monthly.find(t => t.id === x.monthlyId); if (t && mk(x.date) >= (t.lastMonth || '')) { t.amount = x.amount; t.lastMonth = mk(x.date); } }
@@ -1010,14 +1022,17 @@ async function saveForm(btn, more) {
 
 /* ---- monthly item editor ---- */
 function openMonthly(id) {
-  const t = id ? S.data.monthly.find(m => m.id === id) : { label: '', reason: '', category: 'Phone & internet', amount: '', active: true, projectId: null };
+  const t = id ? S.data.monthly.find(m => m.id === id) : { label: '', reason: '', category: 'Phone & internet', amount: '', active: true, projectId: null, every: 1, startMonth: thisMonth() };
   if (!t) return;
-  openSheet(id ? 'Monthly item' : 'New monthly item', `
+  openSheet(id ? 'Repeating item' : 'New repeating item', `
     <label class="field"><span>Name in the PROJECT column</span><input id="mLabel" value="${esc(t.label)}" placeholder="e.g. DU, Home Rent, School"></label>
     <label class="field"><span>Description</span><input id="mReason" value="${esc(t.reason)}" placeholder="e.g. Mobile bill"></label>
     <div class="two"><label class="field"><span>Usual amount (${esc(base())})</span><input id="mAmount" inputmode="decimal" value="${esc(t.amount)}"></label>
     <label class="field"><span>Category</span><select id="mCat">${S.data.categories.map(c => `<option ${c.name === t.category ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label></div>
-    <label style="display:flex;gap:10px;align-items:center;margin-top:14px;font-weight:600"><input type="checkbox" id="mActive" ${t.active !== false ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--acc)"> Add it every month</label>
+    <div class="two"><label class="field"><span>How often</span>${everySelect('id="mEvery"', t.every)}</label>
+    <label class="field"><span>Next due</span><input id="mNext" type="month" value="${esc(nextDue(t))}"></label></div>
+    <div class="small faint" style="margin-top:6px">For yearly rent, pick the month the rent is paid — Billy adds it only in that month each year.</div>
+    <label style="display:flex;gap:10px;align-items:center;margin-top:14px;font-weight:600"><input type="checkbox" id="mActive" ${t.active !== false ? 'checked' : ''} style="width:20px;height:20px;accent-color:var(--acc)"> Keep adding it</label>
     <button class="btn" data-a="monthly-save" data-id="${id || ''}" style="margin-top:18px">Save</button>
     ${id ? `<button class="btn danger" data-a="monthly-del" data-id="${id}" style="margin-top:8px">Remove</button>` : ''}`);
 }
@@ -1039,7 +1054,7 @@ function newClaimHtml() {
     <div class="card" style="text-align:center"><div class="small muted">${esc(claimTitle(period))}</div>
       <div class="serif num" style="font-size:32px;font-weight:700;margin-top:4px">${money(sum(sel))}</div><div class="small muted">${plural(sel.length, 'expense')}</div></div>
     ${noBill ? `<div class="note warn">${plural(noBill, 'expense')} without a bill — ${noBill === 1 ? 'it' : 'they'} will be marked “No bill”.</div>` : ''}
-    ${pending ? `<div class="note warn">${plural(pending, 'monthly item')} not confirmed yet, so not included. Confirm them on Home first if they belong in this claim.</div>` : ''}
+    ${pending ? `<div class="note warn">${plural(pending, 'repeating item')} not confirmed yet, so not included. Confirm them on Home first if they belong in this claim.</div>` : ''}
     <div class="list">${open.map(x => `<button class="row ${nc.sel.has(x.id) ? 'picked' : ''}" data-a="nc-toggle" data-id="${x.id}">
       <span class="tick ${nc.sel.has(x.id) ? 'on' : ''}">${nc.sel.has(x.id) ? '✓' : ''}</span>
       <span class="main"><span class="t">${esc(x.reason || x.category)}</span><span class="s">${shortDate(x.date)} · ${esc(projectText(x))}${x.bills.length ? '' : ' · <b style="color:var(--bad)">no bill</b>'}</span></span>
@@ -1168,7 +1183,7 @@ function openSend(claimId) {
       <div class="small muted">${plural(list.length, 'expense')} · ${esc(p.label)}</div>
       <div class="small" style="margin-top:8px">📗 Excel sheet &nbsp; 📕 Bills PDF &nbsp; 📝 Table in the email</div></div>
     ${noBill ? `<div class="note warn">${plural(noBill, 'expense')} without a bill — marked “No bill” in the sheet.</div>` : ''}
-    ${pending.length ? `<div class="note warn">${plural(pending.length, 'monthly item')} not confirmed yet, so not included. <button class="linkbtn" data-a="send-confirm-all" style="padding:0;color:inherit;text-decoration:underline">Confirm and include them</button></div>` : ''}
+    ${pending.length ? `<div class="note warn">${plural(pending.length, 'repeating item')} not confirmed yet, so not included. <button class="linkbtn" data-a="send-confirm-all" style="padding:0;color:inherit;text-decoration:underline">Confirm and include them</button></div>` : ''}
     ${ready ? `<button class="btn" data-a="send-now" style="margin-top:14px">📧 Send now</button>
       <div class="small faint" style="text-align:center;margin-top:6px">${S.demo ? 'Sample data — nothing is really sent.' : 'Sent from your Gmail. Google may ask you to allow “send email” the first time.'}</div>`
     : `<div class="note">One-time setup needed so Billy can send from your Gmail. <button class="linkbtn" data-a="gmail-help" style="padding:0">How to set it up</button></div>`}
@@ -1390,7 +1405,7 @@ async function learnFrom(sources) {
   });
   if (!ok) return;
   closeSheet(true);
-  S.sugg = { list: suggest, sel: new Set(suggest.filter(x => x.category !== 'Shoot day allowance').map(x => x.id)), n: expenses.length, sheets: claims.length, np: newProjects.size };
+  S.sugg = { every: {}, next: {}, list: suggest, sel: new Set(suggest.filter(x => x.category !== 'Shoot day allowance').map(x => x.id)), n: expenses.length, sheets: claims.length, np: newProjects.size };
   openSheet('What Billy learned', learnedHtml());
 }
 function learnedHtml() {
@@ -1398,12 +1413,15 @@ function learnedHtml() {
   return `<div style="text-align:center;margin-top:14px"><div style="font-size:40px">🧠</div>
       <div class="serif" style="font-size:22px;font-weight:700">${plural(n, 'expense')} from ${plural(sheets, 'sheet')}</div>
       <div class="small muted">${np ? `${plural(np, 'new project')} · ` : ''}saved as history, so they don't count as money waiting.</div></div>
-    ${sg.list.length ? `<div class="card"><h3>Repeat these every month?</h3>
-      <div class="small muted" style="margin-bottom:8px">Ticked items are added at the start of each month with the last amount — you just confirm or attach the bill.</div>
-      <div class="list" style="margin-top:0">${sg.list.map(x => `<button class="row ${sg.sel.has(x.id) ? 'picked' : ''}" data-a="sg-toggle" data-id="${x.id}">
-        <span class="tick ${sg.sel.has(x.id) ? 'on' : ''}">${sg.sel.has(x.id) ? '✓' : ''}</span><span class="ic cat">${catIcon(x.category)}</span>
-        <span class="main"><span class="t">${esc(x.label || x.reason)}</span><span class="s">${esc(x.reason)}</span></span><span class="amt">${moneyS(x.amount)}</span></button>`).join('')}</div>
-      <button class="btn" data-a="sg-save" style="margin-top:12px">Repeat ${plural(sg.sel.size, 'item')} monthly</button></div>` : ''}
+    ${sg.list.length ? `<div class="card"><h3>Make these repeat?</h3>
+      <div class="small muted" style="margin-bottom:8px">Ticked items are added automatically when due, with the last amount — you just confirm or attach the bill. Change “Every month” to “Every year” for things like yearly rent.</div>
+      <div class="list" style="margin-top:0">${sg.list.map(x => `<div class="row ${sg.sel.has(x.id) ? 'picked' : ''}" style="flex-wrap:wrap">
+        <button class="tick ${sg.sel.has(x.id) ? 'on' : ''}" data-a="sg-toggle" data-id="${x.id}" style="background:${sg.sel.has(x.id) ? 'var(--acc)' : 'none'}">${sg.sel.has(x.id) ? '✓' : ''}</button><span class="ic cat">${catIcon(x.category)}</span>
+        <span class="main"><span class="t">${esc(x.label || x.reason)}</span><span class="s">${esc(x.reason)}</span></span><span class="amt">${moneyS(x.amount)}</span>
+        ${sg.sel.has(x.id) ? `<div style="flex-basis:100%;display:flex;gap:8px;padding-left:36px;margin-top:6px">${everySelect(`data-sgevery="${x.id}" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:7px;background:var(--card)"`, sg.every[x.id] || 1)}
+          ${(sg.every[x.id] || 1) > 1 ? `<input type="month" data-sgnext="${x.id}" value="${esc(sg.next[x.id] || addMonths(mk(x.date) || thisMonth(), sg.every[x.id]))}" style="flex:1;border:1px solid var(--line);border-radius:10px;padding:7px;background:var(--card)" title="Next due">` : ''}</div>` : ''}
+        </div>`).join('')}</div>
+      <button class="btn" data-a="sg-save" style="margin-top:12px">Set up ${plural(sg.sel.size, 'repeating item')}</button></div>` : ''}
     <button class="btn sec" data-a="close" style="margin-top:12px">Done</button>`;
 }
 
@@ -1613,18 +1631,25 @@ async function onClick(e) {
     case 'sg-toggle': S.sugg.sel.has(id) ? S.sugg.sel.delete(id) : S.sugg.sel.add(id); redrawSheet(learnedHtml()); break;
     case 'sg-save': {
       const pick = S.sugg.list.filter(x => S.sugg.sel.has(x.id)), m = thisMonth();
-      await mutate(d => { for (const x of pick) d.monthly.push({ id: uuid(), label: x.label || projectById(x.projectId)?.name || '', projectId: x.projectId, category: x.category, reason: x.reason, vendor: x.vendor || '', amount: x.amount, active: true, startMonth: m, lastMonth: mk(x.date) }); });
-      closeSheet(); ensureMonthly(); toast(`${plural(pick.length, 'monthly item')} set up ✓`); break;
+      const sg = S.sugg;
+      await mutate(d => { for (const x of pick) { const every = +sg.every[x.id] || 1; d.monthly.push({ id: uuid(), label: x.label || projectById(x.projectId)?.name || '', projectId: x.projectId, category: x.category, reason: x.reason, vendor: x.vendor || '', amount: x.amount, active: true, every,
+        startMonth: every === 1 ? m : (sg.next[x.id] || addMonths(mk(x.date) || m, every)), lastMonth: mk(x.date) }); } });
+      closeSheet(); ensureMonthly(); toast(`${plural(pick.length, 'repeating item')} set up ✓`); break;
     }
     case 'monthly-new': openMonthly(null); break;
     case 'monthly-edit': openMonthly(id); break;
     case 'monthly-save': {
-      const v = { label: $('#mLabel', sheetEl).value.trim(), reason: $('#mReason', sheetEl).value.trim(), amount: num($('#mAmount', sheetEl).value) || 0, category: $('#mCat', sheetEl).value, active: $('#mActive', sheetEl).checked };
+      const v = { label: $('#mLabel', sheetEl).value.trim(), reason: $('#mReason', sheetEl).value.trim(), amount: num($('#mAmount', sheetEl).value) || 0, category: $('#mCat', sheetEl).value, active: $('#mActive', sheetEl).checked,
+        every: +$('#mEvery', sheetEl).value || 1, startMonth: $('#mNext', sheetEl).value || thisMonth() };
       if (!v.label && !v.reason) return toast('Give it a name.');
-      await mutate(d => { const t = id && d.monthly.find(m => m.id === id); if (t) Object.assign(t, v); else d.monthly.push({ id: uuid(), ...v, startMonth: thisMonth() }); });
+      await mutate(d => {
+        const t = id && d.monthly.find(m => m.id === id); if (t) Object.assign(t, v); else d.monthly.push({ id: uuid(), ...v });
+        // a schedule change can make this month's unconfirmed copy no longer due
+        if (t) d.expenses = d.expenses.filter(x => !(x.monthlyId === t.id && x.pending && (t.active === false || !isDue(t, mk(x.date)))));
+      });
       closeSheet(); ensureMonthly(); break;
     }
-    case 'monthly-del': if (confirm('Stop adding this item every month? Past months stay.')) { await mutate(d => { d.monthly = d.monthly.filter(m => m.id !== id); d.expenses = d.expenses.filter(x => !(x.monthlyId === id && x.pending)); }); closeSheet(); } break;
+    case 'monthly-del': if (confirm('Stop adding this item? Past months stay.')) { await mutate(d => { d.monthly = d.monthly.filter(m => m.id !== id); d.expenses = d.expenses.filter(x => !(x.monthlyId === id && x.pending)); }); closeSheet(); } break;
     case 'cat-new': { const n = (prompt('New category name:') || '').trim(); if (!n) break; const icon = (prompt('An emoji for it (optional):', '🧾') || '🧾').trim().slice(0, 4); await mutateFast(d => { if (!d.categories.some(c => c.name.toLowerCase() === n.toLowerCase())) d.categories.push({ name: n, icon }); }); break; }
     case 'cat-edit': { const icon = prompt(`Emoji for “${k}”:`, catIcon(k)); if (icon) await mutateFast(d => { const c = d.categories.find(c => c.name === k); if (c) c.icon = icon.trim().slice(0, 4); }); break; }
     case 'ai-save': { const v = ($('#aiKey')?.value || '').trim(); if (!/^[\w\-.]{25,}$/.test(v)) { toast('That doesn’t look like an API key'); break; } ls.set('by.aiKey', v); toast('AI bill reading is on'); render(); break; }
@@ -1662,6 +1687,8 @@ async function onChange(e) {
     } catch (err) { toast(err.message); }
     return;
   }
+  if (t.dataset.sgevery) { S.sugg.every[t.dataset.sgevery] = +t.value; redrawSheet(learnedHtml()); return; }
+  if (t.dataset.sgnext) { S.sugg.next[t.dataset.sgnext] = t.value; return; }
   if (t.dataset.set) {
     const key = t.dataset.set, v = key === 'dayRate' ? num(t.value) || 0 : t.value.trim();
     await mutateFast(d => { d.settings[key] = v; }); return;
