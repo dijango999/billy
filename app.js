@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.7',
+  version: '1.6.8',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -757,8 +757,20 @@ function openProject(id) {
 function claimStatus(c) { return c.paidAt ? ['Paid ' + shortDate(c.paidAt), 'good', 3] : c.sentAt ? ['Sent ' + shortDate(c.sentAt), 'info', 2] : ['Not sent yet', 'warn', 1]; }
 function claimsView() {
   const open = openItems(), pending = live().filter(x => x.pending);
-  const cs = (S.data.claims || []).filter(c => !c.imported).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-  const past = (S.data.claims || []).filter(c => c.imported).sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+  // Year and month filter (by the claim's month)
+  const all = S.data.claims || [], cf = (S.cf ||= { year: '', month: '' });
+  const years = [...new Set(all.map(c => (c.month || mk(c.createdAt)).slice(0, 4)).filter(Boolean))].sort().reverse();
+  if (cf.year && !years.includes(cf.year)) { cf.year = ''; cf.month = ''; }
+  const monthsOfYear = cf.year ? [...new Set(all.map(c => c.month || mk(c.createdAt)).filter(m => m.startsWith(cf.year)))].sort().reverse() : [];
+  const pass = c => { const m = c.month || mk(c.createdAt); return (!cf.year || m.startsWith(cf.year)) && (!cf.month || m === cf.month); };
+  const cs = all.filter(c => !c.imported && pass(c)).sort((a, b) => (b.month || '').localeCompare(a.month || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  const past = all.filter(c => c.imported && pass(c)).sort((a, b) => (b.month || '').localeCompare(a.month || ''));
+  const shown = [...cs, ...past], tot = round2(shown.reduce((s, c) => s + (+c.total || 0), 0));
+  const paidTot = round2(shown.filter(c => c.paidAt).reduce((s, c) => s + (+c.total || 0), 0));
+  const filterBar = years.length ? `
+    <div class="months" style="margin-top:14px">${[['', 'All years'], ...years.map(y => [y, y])].map(([k, l]) => `<button data-a="cf-year" data-k="${k}" class="${cf.year === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+    ${cf.year ? `<div class="months" style="margin-top:6px">${[['', 'All months'], ...monthsOfYear.map(m => [m, MONTH_NAMES[+m.slice(5) - 1].slice(0, 3)])].map(([k, l]) => `<button data-a="cf-month" data-k="${k}" class="${cf.month === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+    <div style="display:flex;justify-content:space-between;margin:10px 2px 0;font-size:13.5px"><span class="muted">${plural(shown.length, 'claim')}${cf.month ? ' · ' + monthLabel(cf.month) : cf.year ? ' · ' + cf.year : ''}</span><span><b class="num">${money(tot)}</b>${paidTot && paidTot !== tot ? ` <span class="muted">· ${money(paidTot)} paid</span>` : paidTot ? ' <span class="muted">· all paid</span>' : ''}</span></div>` : '';
   return `
     <div class="card" style="border-color:var(--acc)"><h3>Ready to claim</h3>
       <div class="claimcard" style="margin:0;border:0;padding:0;background:none"><div class="top"><span class="sum">${money(sum(open))}</span><span class="muted small">${plural(open.length, 'expense')}</span></div></div>
@@ -766,12 +778,13 @@ function claimsView() {
       <button class="btn" data-a="send-open" style="margin-top:12px" ${open.length ? '' : 'disabled'}>📧 Email expenses…</button>
       <button class="btn sec" data-a="new-claim" style="margin-top:8px" ${open.length ? '' : 'disabled'}>Choose which ones first</button>
     </div>
+    ${filterBar}
     ${cs.map(c => { const [l, k, n] = claimStatus(c); return `<button class="claimcard" data-a="open-claim" data-id="${c.id}">
       <div class="top"><span class="ttl">${esc(c.title)}</span><span class="chip ${k}">${l}</span></div>
       <div class="top" style="margin-top:6px"><span class="sum">${money(c.total)}</span><span class="muted small">${plural(c.expenseIds.length, 'expense')}</span></div>
       <div class="steps"><span class="on"></span><span class="${n >= 2 ? 'on' : ''}"></span><span class="${n >= 3 ? 'on' : ''}"></span></div>
       ${c.stale && !c.sentAt ? '<div class="small" style="color:var(--warn);margin-top:6px">Changed since the files were made — open to update them.</div>' : ''}
-    </button>`; }).join('') || (open.length ? '' : '<div class="empty">No claims yet.</div>')}
+    </button>`; }).join('') || (shown.length || (open.length && !years.length) ? '' : `<div class="empty">${years.length ? 'No claims for this period.' : 'No claims yet.'}</div>`)}
     ${past.length ? `<div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">Past sheets Billy learned from</h3><div class="list" style="border:0;border-radius:0;margin-top:4px">
       ${past.map(c => `<button class="row" data-a="open-claim" data-id="${c.id}"><span class="ic">📗</span><span class="main"><span class="t">${esc(c.title)}</span><span class="s">${plural(c.expenseIds.length, 'item')}</span></span><span class="amt">${moneyS(c.total)}</span></button>`).join('')}</div></div>` : ''}`;
 }
@@ -1793,6 +1806,8 @@ async function onClick(e) {
     case 'claim-file': { const f = S.blobs[id] || await claimFiles(id).catch(err => { toast(err.message); return null; }); if (f) { k === 'pdf' ? viewBlob(f.pdf, f.pdf.name) : downloadFile(f.xlsx); } break; }
     case 'share-claim': await shareClaim(id); break;
     case 'send-open': openSend(null); break;
+    case 'cf-year': S.cf.year = k; S.cf.month = ''; render(); break;
+    case 'cf-month': S.cf.month = k; render(); break;
     case 'sigma': closeSheet(true); openSigma(); break;
     case 'sg-od': await sigmaFromOneDrive(S.sigmaFiles[+a.dataset.i]); break;
     case 'sg-od-new': { const f = S.sigmaNew[0]; openSigma(); await sigmaFromOneDrive(f); break; }
