@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.0',
+  version: '1.6.1',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1303,34 +1303,45 @@ async function claimFiles(id) {
   const [x, p] = await Promise.all([fileBlob(`Claims/${c.folder}/${c.files.xlsx}`), fileBlob(`Claims/${c.folder}/${c.files.pdf}`)]);
   return (S.blobs[id] = { xlsx: new File([x], c.files.xlsx, { type: CLAIM.XLSX_TYPE }), pdf: new File([p], c.files.pdf, { type: 'application/pdf' }) });
 }
-function emailText(c) {
+function emailText(c, toName) {
   const list = c.expenseIds.map(id => S.data.expenses.find(x => x.id === id)).filter(Boolean);
   const byProj = {}; for (const x of list) { const k = projectText(x); byProj[k] = (byProj[k] || 0) + (+x.amount || 0); }
-  const first = (st().accountant || '').split(' ')[0] || 'Sir';
+  const first = toName === undefined ? ((st().accountant || '').split(' ')[0] || 'Sir') : toName;
   const lines = Object.entries(byProj).sort((a, b) => b[1] - a[1]).map(([k, v]) => `• ${k} — ${money(v)}`).join('\n');
   const noBill = list.filter(x => !x.bills.length).length;
   return {
     subject: `${c.title} — ${money(c.total)}`,
-    body: `Dear ${first},\n\nPlease find attached my expenses for ${c.period}: ${plural(list.length, 'item')}, total ${money(c.total)}.\n\n${lines}\n\nThe Excel sheet lists every expense. The bills PDF has the bills in the same order — the BILL column shows the page.${noBill ? `\n${plural(noBill, 'item')} without a bill.` : ''}\n\nThank you,\n${st().name || ''}`,
+    body: `${first ? 'Dear ' + first + ',' : 'Hello,'}\n\nPlease find attached my expenses for ${c.period}: ${plural(list.length, 'item')}, total ${money(c.total)}.\n\n${lines}\n\nThe Excel sheet lists every expense. The bills PDF has the bills in the same order — the BILL column shows the page.${noBill ? `\n${plural(noBill, 'item')} without a bill.` : ''}\n\nThank you,\n${st().name || ''}`,
   };
 }
 
 /* ---------------- one-click email to accounts (Gmail) ---------------- */
 const firstName = () => (st().accountant || '').split(' ')[0] || 'accounts';
-function emailHtml(c) {
+function emailHtml(c, toName) {
   const list = c.expenseIds.map(id => S.data.expenses.find(x => x.id === id)).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const td = 'padding:6px 10px;border-bottom:1px solid #e5e3dd;font-size:13px;vertical-align:top';
   const rows = list.map((x, i) => `<tr><td style="${td}">${i + 1}</td><td style="${td}">${esc(projectText(x))}</td><td style="${td};white-space:nowrap">${esc(shortDate(x.date))}</td><td style="${td}">${esc(x.reason || x.category)}</td><td style="${td};text-align:right;white-space:nowrap">${esc(money(+x.amount || 0))}</td><td style="${td};color:${x.bills.length ? '#1C7B62' : '#C53B3B'}">${x.bills.length ? 'Attached' : 'No bill'}</td></tr>`).join('');
   const th = 'padding:7px 10px;background:#16181D;color:#fff;font-size:12px;text-align:left';
-  const t = emailText(c);
+  const t = emailText(c, toName);
   const intro = t.body.split('\n\n')[1] || '';
   return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16181D;font-size:14px;line-height:1.5">
-    <p>Dear ${esc(firstName())},</p><p>${esc(intro)}</p>
+    <p>${(n => n ? 'Dear ' + esc(n) + ',' : 'Hello,')(toName === undefined ? firstName() : toName)}</p><p>${esc(intro)}</p>
     <table style="border-collapse:collapse;margin:12px 0;min-width:520px"><tr><th style="${th}">No.</th><th style="${th}">Project</th><th style="${th}">Date</th><th style="${th}">Description</th><th style="${th};text-align:right">Amount</th><th style="${th}">Bill</th></tr>${rows}
     <tr><td colspan="4" style="padding:8px 10px;font-weight:700;text-align:right;border-top:2px solid #E4572E">TOTAL</td><td style="padding:8px 10px;font-weight:700;text-align:right;white-space:nowrap;border-top:2px solid #E4572E">${esc(money(c.total))}</td><td style="border-top:2px solid #E4572E"></td></tr></table>
     <p>The Excel sheet and the bills PDF are attached. In the PDF the bills are in the same order — the BILL column of the sheet shows the page.</p>
     <p>Thank you,<br>${esc(st().name || '')}</p></div>`;
 }
+
+/** Quick choices for the To field: the accountant first, then yourself, then addresses used before. */
+function recipients() {
+  const out = [], seen = new Set(), add = (email, label) => { const e = (email || '').trim(); if (!e || seen.has(e.toLowerCase())) return; seen.add(e.toLowerCase()); out.push({ email: e, label }); };
+  add(st().email, (st().accountant || 'Accounts').split(' ')[0] + ' (accounts)');
+  add(st().fromEmail, 'Me');
+  for (const e of st().recentTo || []) add(e, e);
+  return out.slice(0, 6);
+}
+const nameFor = to => (to || '').toLowerCase() === (st().email || '').toLowerCase() ? firstName() : '';
+
 /** Opens the "send to accounts" check screen. claimId = existing claim, or null to claim everything that is waiting. */
 function openSend(claimId) {
   const c = claimId ? claimById(claimId) : null;
@@ -1339,11 +1350,14 @@ function openSend(claimId) {
   const pending = c ? [] : live().filter(x => x.pending);
   const p = c ? { label: c.period } : periodOf(list), title = c ? c.title : claimTitle(p), noBill = list.filter(x => !x.bills.length).length;
   const ready = !!(st().googleClientId || CFG.googleClientId) || S.demo;
-  S.sendFor = { claimId, ids: list.map(x => x.id) };
+  S.sendFor = { claimId, ids: list.map(x => x.id), to: st().email || '' };
   GMAIL.load().catch(() => {});
-  openSheet('Send to ' + firstName(), `
-    <div class="card" style="margin-top:12px"><dl class="kv">
-      <dt>To</dt><dd>${esc(st().accountant)} &lt;${esc(st().email)}&gt;</dd>
+  openSheet('Send claim', `
+    <div class="card" style="margin-top:12px">
+      <label class="field" style="margin-top:0"><span>To</span><input id="sendTo" type="email" inputmode="email" autocapitalize="off" value="${esc(S.sendFor.to)}" placeholder="name@example.com"></label>
+      <div class="pills" style="margin-top:8px">${recipients().map(r => `<button data-a="send-to" data-k="${esc(r.email)}" class="${r.email.toLowerCase() === S.sendFor.to.toLowerCase() ? 'on' : ''}">${esc(r.label)}</button>`).join('')}</div>
+    </div>
+    <div class="card"><dl class="kv">
       <dt>From</dt><dd>${esc(st().fromEmail || 'your Gmail')}</dd>
       ${st().cc ? `<dt>Cc</dt><dd>${esc(st().cc)}</dd>` : ''}
       <dt>Subject</dt><dd style="font-weight:500">${esc(title)} — ${esc(money(sum(list)))}</dd>
@@ -1360,7 +1374,10 @@ function openSend(claimId) {
 }
 async function sendNow(btn) {
   const sf = S.sendFor; if (!sf) return;
-  let tok = null;
+  sf.to = ($('#sendTo', sheetEl)?.value || '').trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(sf.to)) return toast('Enter a valid email address.');
+  const toAccounts = sf.to.toLowerCase() === (st().email || '').toLowerCase(), toName = nameFor(sf.to);
+  let tok = null, step = 'Google sign-in';
   btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px"></span> Sending…';
   try {
     if (!S.demo) tok = await GMAIL.authorize((st().googleClientId || CFG.googleClientId), st().fromEmail);   // first, while the tap still counts
@@ -1373,8 +1390,9 @@ async function sendNow(btn) {
       if (claimById(id).stale || !claimById(id).files) { if (!(await buildClaimFiles(id))) throw new Error('Could not make the files.'); }
       else { progress('Getting the files…'); await claimFiles(id); progress(null); }
     }
-    const c = claimById(id), f = S.blobs[id], t = emailText(c);
-    let files = [f.xlsx, f.pdf], html = emailHtml(c), text = t.body;
+    step = 'Preparing the email';
+    const c = claimById(id), f = S.blobs[id], t = emailText(c, toName);
+    let files = [f.xlsx, f.pdf], html = emailHtml(c, toName), text = t.body;
     if (GMAIL.tooBig(files) && !S.demo) {     // bills too large for an attachment: send a OneDrive link instead
       progress('Bills PDF is large — adding a OneDrive link…');
       const link = await claimLink(c);
@@ -1382,13 +1400,17 @@ async function sendNow(btn) {
       text = text.replace('The Excel sheet', `Bills PDF (too large to attach): ${link}\n\nThe Excel sheet`);
       html = html.replace('<p>The Excel sheet and the bills PDF are attached.', `<p>The Excel sheet is attached. The bills PDF is too large to attach — <a href="${link}">open it in OneDrive</a>.`);
     }
-    progress('Sending to ' + firstName() + '…');
+    progress('Sending to ' + (toName || sf.to) + '…'); step = 'Sending with Gmail';
     let msgId = 'demo';
-    if (!S.demo) msgId = await GMAIL.send(tok, { from: st().fromEmail, to: `${st().accountant} <${st().email}>`, cc: st().cc, subject: t.subject, text, html, files });
-    await mutate(d => { const k = d.claims.find(z => z.id === id); if (k) { k.sentAt = todayStr(); k.sentVia = 'gmail'; k.messageId = msgId; k.sentTo = st().email; } });
+    if (!S.demo) msgId = await GMAIL.send(tok, { to: toAccounts && st().accountant ? `${st().accountant} <${sf.to}>` : sf.to, cc: toAccounts ? st().cc : '', subject: t.subject, text, html, files });
+    await mutate(d => {
+      const k = d.claims.find(z => z.id === id);
+      if (k) { (k.emails ||= []).push({ to: sf.to, at: isoNow(), id: msgId }); if (toAccounts) { k.sentAt = todayStr(); k.sentVia = 'gmail'; k.messageId = msgId; k.sentTo = sf.to; } }
+      if (!toAccounts) d.settings.recentTo = [sf.to, ...(d.settings.recentTo || []).filter(e => e.toLowerCase() !== sf.to.toLowerCase())].slice(0, 4);
+    });
     progress(null); closeSheet(true); openClaim(id);
-    toast(S.demo ? 'Sample — not really sent ✓' : `Sent to ${firstName()} ✓`);
-  } catch (e) { progress(null); toast(e.message); btn.disabled = false; btn.innerHTML = '📧 Send now'; }
+    toast(S.demo ? 'Sample — not really sent ✓' : `Sent to ${toName || sf.to} ✓`);
+  } catch (e) { progress(null); toast(`${step}: ${e.message}`); btn.disabled = false; btn.innerHTML = '📧 Send now'; }
 }
 async function claimLink(c) {
   const meta = await (await g(item(`Claims/${c.folder}/${c.files.pdf}`) + '?$select=id')).json();
@@ -1433,8 +1455,8 @@ function openClaim(id) {
         <button class="row" data-a="claim-file" data-id="${id}" data-k="xlsx"><span class="ic">📗</span><span class="main"><span class="t">${esc(c.files.xlsx)}</span><span class="s">Excel · same layout as your monthly sheet</span></span><span class="faint">›</span></button>
         <button class="row" data-a="claim-file" data-id="${id}" data-k="pdf"><span class="ic">📕</span><span class="main"><span class="t">${esc(c.files.pdf)}</span><span class="s">All bills in order${c.noBill ? ` · ${c.noBill} without bill` : ''}</span></span><span class="faint">›</span></button>
       </div></div>
-    ${c.sentVia === 'gmail' ? `<div class="note" style="background:var(--goodSoft);color:var(--good)">📧 Emailed to ${esc(c.sentTo || st().email)} on ${shortDate(c.sentAt)}.</div>` : ''}
-    <button class="btn ${c.sentAt ? 'sec' : ''}" data-a="send-claim" data-id="${id}" style="margin-top:14px">📧 ${c.sentAt ? 'Send again' : 'Send to ' + esc(firstName())}</button>
+    ${(c.emails || []).length ? `<div class="note" style="background:var(--goodSoft);color:var(--good)">${c.emails.map(e => `📧 Emailed to ${esc(e.to)} · ${shortDate(e.at.slice(0, 10))}`).join('<br>')}</div>` : c.sentVia === 'gmail' ? `<div class="note" style="background:var(--goodSoft);color:var(--good)">📧 Emailed to ${esc(c.sentTo || st().email)} on ${shortDate(c.sentAt)}.</div>` : ''}
+    <button class="btn ${c.sentAt ? 'sec' : ''}" data-a="send-claim" data-id="${id}" style="margin-top:14px">📧 ${c.sentAt ? 'Send again' : 'Send email'}</button>
     <div class="actions">
       <button class="btn sec" data-a="share-claim" data-id="${id}" ${ready || !canShare ? '' : 'disabled'}>📤 Share / Mail app</button>
       ${S.demo ? '' : `<button class="btn sec" data-a="email-link" data-id="${id}">✉︎ Email a OneDrive link</button>`}
@@ -1776,6 +1798,7 @@ async function onClick(e) {
     case 'sg-again': S.sg.days = null; redrawSheet(sigmaHtml()); break;
     case 'send-claim': openSend(id); break;
     case 'send-now': await sendNow(a); break;
+    case 'send-to': { S.sendFor.to = k; const i = $('#sendTo', sheetEl); if (i) i.value = k; sheetEl.querySelectorAll('[data-a="send-to"]').forEach(b => b.classList.toggle('on', b.dataset.k === k)); break; }
     case 'send-confirm-all': await mutateFast(d => { for (const x of d.expenses) delete x.pending; }); closeSheet(true); openSend(null); break;
     case 'send-other': { const sf = S.sendFor; closeSheet(true); if (sf.claimId) { await shareClaim(sf.claimId); } else { S.nc = { sel: new Set(sf.ids) }; const cid = await makeClaim(null, true); if (cid) openClaim(cid); } break; }
     case 'gmail-help': openGmailHelp(); break;

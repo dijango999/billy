@@ -73,15 +73,23 @@ const GMAIL = (() => {
     return m + `--${b1}--\r\n`;
   }
 
-  /** Sends the message. Returns the Gmail message id. */
+  /** Sends the message. Returns the Gmail message id.
+   * Small messages (most claims) go as JSON to the standard endpoint; large ones use the documented upload
+   * endpoint on www.googleapis.com (gmail.googleapis.com/upload is not reachable from Safari). */
   async function send(tok, msg) {
     const raw = await mime(msg);
-    const r = await fetch('https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', {
-      method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'message/rfc822' }, body: raw,
-    });
+    const b64url = s => { const b = new TextEncoder().encode(s); let x = ''; for (let i = 0; i < b.length; i += 0x8000) x += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(x).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+    const small = raw.length < 4.5 * 1024 * 1024;
+    let r;
+    try {
+      r = small
+        ? await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify({ raw: b64url(raw) }) })
+        : await fetch('https://www.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'message/rfc822' }, body: raw });
+    } catch (e) { throw new Error('Could not reach Gmail (' + (e.message || 'network') + '). Check the internet and try again.'); }
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) { token = null; throw new Error('Google sign-in expired — tap Send again.'); }
-    if (!r.ok) throw new Error(j.error?.message || `Gmail could not send the email (${r.status}).`);
+    if (r.status === 403 && /insufficient|scope/i.test(j.error?.message || '')) { token = null; throw new Error('Gmail permission missing — tap Send again and tick “Send email on your behalf”.'); }
+    if (!r.ok) throw new Error('Gmail: ' + (j.error?.message || `could not send the email (${r.status}).`));
     return j.id;
   }
   const tooBig = files => files.reduce((a, f) => a + f.size, 0) * 1.37 > MAX;
