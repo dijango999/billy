@@ -60,7 +60,6 @@ const GMAIL = (() => {
   async function mime({ from, to, cc, subject, text, html, files }) {
     const b1 = 'billy_mixed_' + Math.random().toString(36).slice(2), b2 = 'billy_alt_' + Math.random().toString(36).slice(2);
     let m = '';
-    if (from) m += `From: ${from}\r\n`;
     m += `To: ${to}\r\n`;
     if (cc) m += `Cc: ${cc}\r\n`;
     m += `Subject: ${header(subject)}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${b1}"\r\n\r\n`;

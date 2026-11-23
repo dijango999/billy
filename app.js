@@ -19,7 +19,9 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.5.0',
+  version: '1.6.0',
+  // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
+  googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -788,10 +790,9 @@ function settingsView() {
       <label class="field"><span>Currency</span><select data-set="currency">${CURRENCIES.map(c => `<option ${c === s.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label></div>
     </div>
     <div class="card"><h3>📧 Email to accounts</h3>
-      <div class="two"><label class="field"><span>Send from (your Gmail)</span><input data-set="fromEmail" type="email" value="${esc(s.fromEmail)}" placeholder="shaheer@choppershoot.com"></label>
+      <div class="two"><label class="field"><span>Send from (Gmail account)</span><input data-set="fromEmail" type="email" value="${esc(s.fromEmail)}" placeholder="shaheer@choppershoot.com"></label>
       <label class="field"><span>Cc (optional)</span><input data-set="cc" type="email" value="${esc(s.cc)}" placeholder="e.g. yourself"></label></div>
-      <label class="field"><span>Google Client ID ${s.googleClientId ? '· ✓ set' : ''}</span><input data-set="googleClientId" value="${esc(s.googleClientId)}" placeholder="….apps.googleusercontent.com" autocapitalize="off" spellcheck="false"></label>
-      <button class="linkbtn" data-a="gmail-help" style="margin-top:6px">How to get the Client ID (once, 5 minutes)</button>
+      <div class="small muted" style="margin-top:8px">✓ Gmail sending is set up. The first time you send, Google asks which account to use and to allow “send email”. Pick the address the email should come from.</div>
     </div>
     <div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">🔁 Repeating items<span class="grow"></span><button class="linkbtn" data-a="monthly-new" style="text-transform:none;letter-spacing:0">＋ Add</button></h3>
       <div class="small muted" style="padding:0 14px">Monthly, quarterly or yearly. Billy adds each one in the month it's due, with the last amount, for you to confirm.</div>
@@ -1337,7 +1338,7 @@ function openSend(claimId) {
   if (!list.length) return toast('Nothing to send yet.');
   const pending = c ? [] : live().filter(x => x.pending);
   const p = c ? { label: c.period } : periodOf(list), title = c ? c.title : claimTitle(p), noBill = list.filter(x => !x.bills.length).length;
-  const ready = !!st().googleClientId || S.demo;
+  const ready = !!(st().googleClientId || CFG.googleClientId) || S.demo;
   S.sendFor = { claimId, ids: list.map(x => x.id) };
   GMAIL.load().catch(() => {});
   openSheet('Send to ' + firstName(), `
@@ -1362,7 +1363,7 @@ async function sendNow(btn) {
   let tok = null;
   btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px"></span> Sending…';
   try {
-    if (!S.demo) tok = await GMAIL.authorize(st().googleClientId, st().fromEmail);   // first, while the tap still counts
+    if (!S.demo) tok = await GMAIL.authorize((st().googleClientId || CFG.googleClientId), st().fromEmail);   // first, while the tap still counts
     let id = sf.claimId;
     if (!id) {
       S.nc = { sel: new Set(sf.ids) };
