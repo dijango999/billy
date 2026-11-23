@@ -232,7 +232,7 @@ function normalize(d) {
   d.projects ||= []; d.expenses ||= []; d.claims ||= []; d.monthly ||= []; d.learned ||= [];
   if (!d.categories?.length) d.categories = CATS.map(c => ({ ...c }));
   for (const c of CATS) if (!d.categories.some(x => x.name === c.name)) d.categories.push({ ...c });
-  d.settings = { name: '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50, fromEmail: '', cc: '', googleClientId: '', ...(d.settings || {}) };
+  d.settings = { name: '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 150, fromEmail: '', cc: '', googleClientId: '', ...(d.settings || {}) };
   for (const x of d.expenses) { x.bills ||= []; x.currency ||= d.settings.currency; }
   return d;
 }
@@ -867,11 +867,11 @@ let F = null;   // the form being edited
 function newForm(from = {}) {
   const recent = recentProjects()[0];
   return { id: null, date: todayStr(), projectId: from.projectId ?? (S.f.lastProject ?? recent?.id ?? null), label: '', category: '', reason: '', vendor: '',
-    amount: '', currency: base(), origAmount: '', fx: null, days: '', rate: st().dayRate || 50, bills: [], add: [], removed: [], touched: new Set(), scan: null, repeatEvery: '0', ...from };
+    amount: '', currency: base(), origAmount: '', fx: null, days: '', rate: st().dayRate || 150, bills: [], add: [], removed: [], touched: new Set(), scan: null, repeatEvery: '0', ...from };
 }
 function openForm(id, preset = {}) {
   const x = id ? S.data.expenses.find(e => e.id === id) : null;
-  F = x ? newForm({ ...JSON.parse(JSON.stringify(x)), amount: x.currency !== base() ? '' : String(x.amount ?? ''), origAmount: x.origAmount ? String(x.origAmount) : '', days: x.days ? String(x.days) : '', rate: x.rate || st().dayRate || 50, touched: new Set(['all']), add: [], removed: [] })
+  F = x ? newForm({ ...JSON.parse(JSON.stringify(x)), amount: x.currency !== base() ? '' : String(x.amount ?? ''), origAmount: x.origAmount ? String(x.origAmount) : '', days: x.days ? String(x.days) : '', rate: x.rate || st().dayRate || 150, touched: new Set(['all']), add: [], removed: [] })
         : newForm(preset);
   if (x && x.currency !== base()) F.amount = String(x.origAmount || '');
   if (x && x.currency === base()) F.amount = String(x.amount ?? '');
