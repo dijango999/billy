@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.4.0',
+  version: '1.5.0',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -315,7 +315,7 @@ async function pull(force) {
     const remote = await loadRemote();
     if (!remote) { S.phase = 'setup'; render(); return; }
     applyData(remote.data, remote.etag); setSync('ok');
-    ensureMonthly();
+    ensureMonthly(); checkSigmaExports();
   } catch (e) {
     if (e instanceof AuthError) { if (trySilent()) return; S.phase = 'needsignin'; render(); return; }
     setSync('bad', e.status === 0 ? 'Offline — showing the last synced copy' : e.message);
@@ -669,6 +669,17 @@ function homeView() {
       ${open.length ? `<button class="btn cta" data-a="send-open">📧 Send ${esc(monthLabel(periodOf(open).month).split(' ')[0])} expenses to ${esc(firstName())}</button>
       <button class="linkbtn" data-a="new-claim" style="color:#FFC2A8;display:block;margin:8px auto 0">Choose which ones first</button>` : ''}
     </div>
+    ${(() => { const k = new Date().getDate() <= 7 ? prevMonth(m) : m, have = sigmaFor(k);
+      const nf = (S.sigmaNew || [])[0];
+      if (nf) return `<button class="claimcard" data-a="sg-od-new" style="display:flex;gap:12px;align-items:center;border-color:var(--acc)">
+        <span class="ic" style="background:var(--acc);color:#fff;font-size:20px">📅</span>
+        <span style="flex:1;min-width:0"><span class="ttl" style="display:block">New Sigma export: ${monthLabel(nf.month)}</span>
+        <span class="small muted">Found in OneDrive — tap to add your shoot days</span></span><span class="faint">›</span></button>`;
+      return `<button class="claimcard" data-a="sigma" style="display:flex;gap:12px;align-items:center">
+        <span class="ic" style="background:var(--accSoft);font-size:20px">📅</span>
+        <span style="flex:1;min-width:0"><span class="ttl" style="display:block">Shoot days from Sigma</span>
+        <span class="small muted">${have ? `${monthLabel(k)}: ${plural(have.days || 0, 'day')} · ${moneyS(+have.amount || 0)} — tap to update` : `Add your ${monthLabel(k).split(' ')[0]} shoot days × ${moneyS(+st().dayRate || 150)}`}</span></span>
+        <span class="faint">›</span></button>`; })()}
     ${pending.length ? `<div class="card"><h3>🔁 Due in ${monthLabel(m)}</h3>
       <div class="small muted" style="margin:-4px 0 8px">Your repeating items, filled in with the last amount. Tap one to change the amount or attach the bill.</div>
       <div class="list" style="margin-top:0">${pending.map(x => `<div class="row" style="padding:10px 12px">
@@ -677,12 +688,6 @@ function homeView() {
         <span class="amt">${moneyS(+x.amount || 0)}</span>
         <button class="chip good" data-a="confirm" data-id="${x.id}" style="border:0;padding:7px 11px;font-size:13px">✓</button></div>`).join('')}</div>
       ${pending.length > 1 ? `<button class="btn sec" data-a="confirm-all" style="margin-top:10px">✓ Confirm all ${pending.length} · ${moneyS(sum(pending))}</button>` : ''}</div>` : ''}
-    ${(() => { const k = new Date().getDate() <= 7 ? prevMonth(m) : m, have = sigmaFor(k);
-      return `<button class="claimcard" data-a="sigma" style="display:flex;gap:12px;align-items:center">
-        <span class="ic" style="background:var(--accSoft);font-size:20px">📅</span>
-        <span style="flex:1;min-width:0"><span class="ttl" style="display:block">Shoot days from Sigma</span>
-        <span class="small muted">${have ? `${monthLabel(k)}: ${plural(have.days || 0, 'day')} · ${moneyS(+have.amount || 0)} — tap to update` : `Add your ${monthLabel(k).split(' ')[0]} shoot days × ${moneyS(+st().dayRate || 150)}`}</span></span>
-        <span class="faint">›</span></button>`; })()}
     ${!learnedAny && !S.demo && ls.get('by.learnSkip') !== '1' ? `<div class="card" style="border-color:var(--acc)"><h3>🧠 Learn from your past sheets</h3>
       <div class="small muted">Billy can read the monthly expense sheets you sent before (in ${esc(PAST_FOLDER.split('/').slice(-2).join(' › '))}) to learn your projects, categories and the items that repeat every month or year.</div>
       <div class="actions"><button class="btn" data-a="learn">Read past sheets</button><button class="btn sec" data-a="learn-skip">Not now</button></div></div>` : ''}
@@ -1055,6 +1060,7 @@ const dayLine = d => `${parseDay(d.date).toLocaleDateString('en-GB', { day: '2-d
 function openSigma() {
   S.sg = { days: null, file: null, month: '', sel: new Set(), rate: +st().dayRate || 150, err: '' };
   openSheet('Shoot days from Sigma', sigmaHtml());
+  if (!S.demo) checkSigmaExports(true).then(() => { if (sheetEl && S.sg && !S.sg.days) redrawSheet(sigmaHtml()); });
 }
 function sigmaHtml() {
   const g = S.sg;
@@ -1063,9 +1069,12 @@ function sigmaHtml() {
     <ol style="padding-left:20px;line-height:1.7;font-size:14.5px;margin-bottom:6px">
       <li>Open <a href="${SIGMA_URL}" target="_blank" rel="noopener" style="color:var(--acc);font-weight:700">Team Sigma</a> → <b>My days</b> and pick the month.</li>
       <li>Tap <b>Export Excel</b> at the bottom.</li>
-      <li>Choose that file here.</li>
+      <li>In Excel tap <b>Share → Upload</b> to <b>OneDrive – Personal</b> — Billy finds it by itself. (Or Save to Files and choose it below.)</li>
     </ol>
-    <label class="btn" style="margin-top:8px">📅 Choose the Sigma Excel file<input type="file" accept=".xlsx,.xls,.csv" hidden data-sigmafile></label>
+    ${S.demo ? '' : `<div class="card" style="margin-top:12px;padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">In your OneDrive<span class="grow"></span><button class="linkbtn" data-a="sg-od-refresh" style="text-transform:none;letter-spacing:0">${S.sigmaChecking ? '…' : 'Look again'}</button></h3>
+      <div class="list" style="border:0;border-radius:0;margin-top:6px">${(S.sigmaFiles || []).slice(0, 6).map((f, i) => `<button class="row" data-a="sg-od" data-i="${i}"><span class="ic">📗</span><span class="main"><span class="t">${f.month ? monthLabel(f.month) : esc(f.name)}</span><span class="s">${esc(f.name)} · ${shortDate((f.at || '').slice(0, 10))}</span></span>${sigmaFor(f.month) ? '<span class="chip good">Added</span>' : '<span class="chip acc">New</span>'}</button>`).join('')
+        || `<div class="small muted" style="padding:4px 14px 14px">No Sigma export in OneDrive yet. In Sigma tap <b>Export Excel</b>, then in Excel tap <b>Share → Upload</b> (Location: OneDrive – Personal). Billy finds it here.</div>`}</div></div>`}
+    <label class="btn ${S.demo ? '' : 'sec'}" style="margin-top:10px">📅 Choose the Sigma Excel file<input type="file" accept=".xlsx,.xls,.csv" hidden data-sigmafile></label>
     ${g.err ? `<div class="note warn">${esc(g.err)}</div>` : ''}
     <div class="field" style="margin-top:16px"><span>…or paste</span>
       <textarea id="sgText" rows="4" style="border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Long-press here → Paste. Works with the Excel file you copied from Sigma, copied rows, or the My days page"></textarea></div>
@@ -1097,6 +1106,42 @@ function sigmaLoaded(days, file) {
   g.month = months.includes(thisMonth()) ? thisMonth() : months[months.length - 1];
   g.sel = new Set(count.filter(d => d.date <= today).map(d => d.date + d.project));
   redrawSheet(sigmaHtml());
+}
+
+
+/* Sigma exports in OneDrive: Excel's Share › Upload puts "Team Sigma - <name> - YYYY-MM.xlsx" in your OneDrive.
+   Billy looks for those on open / refresh and offers any month that is new or was exported again. */
+async function findSigmaExports() {
+  const j = await (await g(`/me/drive/root/search(q='Team Sigma')?$select=id,name,file,size,lastModifiedDateTime,parentReference&$top=100`)).json();
+  return (j.value || []).filter(f => f.file && /team\s*sigma/i.test(f.name) && /\.(xlsx|xls|csv)$/i.test(f.name))
+    .map(f => ({ id: f.id, driveId: f.parentReference?.driveId, name: f.name, at: f.lastModifiedDateTime, month: (/(20\d{2})-(\d{2})/.exec(f.name) || [])[0] || '' }))
+    .sort((a, b) => (b.month || '').localeCompare(a.month || '') || (b.at || '').localeCompare(a.at || ''));
+}
+async function checkSigmaExports(force) {
+  if (S.demo || !tokens || S.sigmaChecking || !navigator.onLine) return;
+  if (!force && Date.now() - (S.sigmaAt || 0) < 90 * 1000) return;
+  S.sigmaChecking = true; S.sigmaAt = Date.now();
+  try {
+    const files = await findSigmaExports(), seen = lsJSON('by.sigmaSeen', {});
+    S.sigmaFiles = files;
+    S.sigmaNew = files.filter(f => {
+      if (!f.month || seen[f.id] === f.at) return false;
+      const x = sigmaFor(f.month);
+      return !x || (!['sent', 'paid'].includes(status(x)) && (x.sigmaFileAt || '') < f.at);
+    });
+    if (S.phase === 'ready') render();
+  } catch (e) { console.warn('sigma search', e); }
+  S.sigmaChecking = false;
+}
+async function sigmaFromOneDrive(f) {
+  progress('Reading ' + f.name + '…');
+  try {
+    const blob = await (await g(`/drives/${f.driveId}/items/${f.id}/content`)).blob();
+    progress(null);
+    S.sg.odFile = f;
+    await sigmaFromFile(new File([blob], f.name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    if (f.month && S.sg.days?.some(d => mk(d.date) === f.month)) { S.sg.month = f.month; S.sg.sel = new Set(S.sg.days.filter(d => mk(d.date) === f.month && d.date <= todayStr()).map(d => d.date + d.project)); redrawSheet(sigmaHtml()); }
+  } catch (e) { progress(null); toast(e.message); }
 }
 
 /** A Sigma export as a file — picked, or pasted after "Copy" in the share sheet. */
@@ -1139,10 +1184,11 @@ async function sigmaAdd(btn) {
   try {
     const rec = { date: days[days.length - 1].date, projectId: null, label: 'Shoot Days', category: 'Shoot day allowance',
       reason: `${plural(days.length, 'shoot day')} — ${monthLabel(g.month)} (Sigma)`, vendor: 'Team Sigma',
-      amount: round2(days.length * rate), currency: base(), origAmount: null, fx: null, days: days.length, rate, sigmaMonth: g.month,
+      amount: round2(days.length * rate), currency: base(), origAmount: null, fx: null, days: days.length, rate, sigmaMonth: g.month, sigmaFileAt: g.odFile?.at || isoNow(),
       sigma: days.map(d => ({ date: d.date, project: d.project, client: d.client, note: d.note })) };
     const bills = [];
     if (g.file) bills.push(await saveBill(g.file, rec));
+    if (g.odFile) { const seen = lsJSON('by.sigmaSeen', {}); seen[g.odFile.id] = g.odFile.at; ls.set('by.sigmaSeen', JSON.stringify(seen)); S.sigmaNew = (S.sigmaNew || []).filter(f => f.id !== g.odFile.id); }
     await mutate(d => {
       let x = d.expenses.find(e => e.sigmaMonth === rec.sigmaMonth && !e.imported);
       if (!x) { x = { id: uuid(), bills: [], claimId: null, createdAt: isoNow() }; d.expenses.push(x); }
@@ -1718,6 +1764,9 @@ async function onClick(e) {
     case 'share-claim': await shareClaim(id); break;
     case 'send-open': openSend(null); break;
     case 'sigma': closeSheet(true); openSigma(); break;
+    case 'sg-od': await sigmaFromOneDrive(S.sigmaFiles[+a.dataset.i]); break;
+    case 'sg-od-new': { const f = S.sigmaNew[0]; openSigma(); await sigmaFromOneDrive(f); break; }
+    case 'sg-od-refresh': await checkSigmaExports(true); if (sheetEl && !S.sg.days) redrawSheet(sigmaHtml()); break;
     case 'sg-read': { const t = $('#sgText', sheetEl)?.value || ''; if (!t.trim()) { toast('Paste the copied rows first.'); break; } sigmaLoaded(SIGMA.fromPaste(t), null); break; }
     case 'sg-clip': { try { await sigmaFromClipboard(); } catch { toast('Nothing to paste — in Sigma tap Copy on the file (or copy the rows), then try again. Or use “Choose the Sigma Excel file”.'); } break; }
     case 'sg-month': S.sg.month = k; S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; redrawSheet(sigmaHtml()); break;
@@ -1879,7 +1928,7 @@ async function refreshAll() {
   try {
     await checkForUpdate();                     // reloads the page if a newer Billy is published
     if (S.demo) { await new Promise(r => setTimeout(r, 400)); toast('Sample data — nothing to sync'); }
-    else { await pull(true); ensureMonthly(); if (S.sync.state !== 'bad') toast('Up to date ✓'); }
+    else { await pull(true); ensureMonthly(); await checkSigmaExports(true); if (S.sync.state !== 'bad') toast('Up to date ✓'); }
   } finally { S.refreshing = false; render(); }
 }
 (() => {
@@ -1936,6 +1985,7 @@ async function boot() {
   try {
     if (!(await resolveLocation())) { S.phase = 'folder'; render(); return; }
     await pull(!cached);
+    checkSigmaExports();
     if (!S.data && S.phase !== 'setup' && S.phase !== 'needsignin') S.phase = 'setup';
     render();
   } catch (e) {
@@ -1944,6 +1994,6 @@ async function boot() {
     else { S.phase = 'welcome'; render(); toast(e.message); }
   }
 }
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.phase === 'ready') pull(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && S.phase === 'ready') { pull(); checkSigmaExports(); } });
 window.addEventListener('scroll', () => $('header.top')?.classList.toggle('scrolled', window.scrollY > 4), { passive: true });
 boot();
