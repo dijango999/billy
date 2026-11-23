@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.1',
+  version: '1.6.2',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1467,7 +1467,9 @@ function openClaim(id) {
       ${c.paidAt ? `<button class="btn sec" data-a="unpaid" data-id="${id}">Undo “Paid”</button>` : `<button class="btn sec" data-a="paid" data-id="${id}" ${c.sentAt ? '' : 'disabled'}>Mark as paid</button>`}
     </div>
     <div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">In this claim</h3><div class="list" style="border:0;border-radius:0;margin-top:4px">${list.map(x => expenseRow(x, { date: true })).join('')}</div></div>
-    ${c.sentAt ? '' : `<div class="actions"><button class="btn sec" data-a="rebuild" data-id="${id}">Remake files</button><button class="btn danger" data-a="cancel-claim" data-id="${id}">Cancel claim</button></div>`}`);
+    ${c.sentAt ? '' : `<div class="actions"><button class="btn sec" data-a="rebuild" data-id="${id}">Remake files</button><button class="btn danger" data-a="cancel-claim" data-id="${id}">Cancel claim</button></div>`}
+    ${c.sentAt || (c.emails || []).length ? `<button class="btn sec" data-a="undo-test" data-id="${id}" style="margin-top:10px">↩︎ That was a test — undo</button>
+      <div class="small faint" style="text-align:center;margin-top:4px">Clears the send history and puts these expenses back in “Ready to claim”. Nothing else changes.</div>` : ''}`);
   if (c.files && !ready) claimFiles(id).then(() => { if (sheetEl && $('[data-a="share-claim"]', sheetEl)?.dataset.id === id) { const b = $('[data-a="share-claim"]', sheetEl); b.disabled = false; b.innerHTML = `📤 Send to ${esc(st().accountant?.split(' ')[0] || 'accounts')}`; } }).catch(e => toast(e.message));
 }
 function downloadFile(file) {
@@ -1809,6 +1811,16 @@ async function onClick(e) {
     case 'unsent': await mutateFast(d => { const c = d.claims.find(z => z.id === id); if (c) { c.sentAt = null; c.paidAt = null; } }); closeSheet(true); openClaim(id); break;
     case 'paid': await mutateFast(d => { const c = d.claims.find(z => z.id === id); if (c) c.paidAt = todayStr(); }); closeSheet(true); openClaim(id); toast('Marked as paid ✓'); break;
     case 'unpaid': await mutateFast(d => { const c = d.claims.find(z => z.id === id); if (c) c.paidAt = null; }); closeSheet(true); openClaim(id); break;
+    case 'undo-test': {
+      const c = claimById(id); if (!c) break;
+      if (!confirm(`Undo “${c.title}”?\n\nIts ${plural(c.expenseIds.length, 'expense')} go back to Ready to claim and the send history is cleared. Your expenses and bills are kept. (Emails already sent can't be unsent.)`)) break;
+      const folder = c.folder;
+      if (await mutate(d => { d.claims = d.claims.filter(z => z.id !== id); for (const x of d.expenses) if (x.claimId === id) x.claimId = null; })) {
+        delete S.blobs[id]; if (folder) moveToRemoved(`Claims/${folder}`);
+        closeSheet(); S.tab = 'home'; render(); toast('Undone — expenses are back in Ready to claim ✓');
+      }
+      break;
+    }
     case 'cancel-claim': {
       if (!confirm('Cancel this claim? Its expenses go back to “To claim”. The files stay in OneDrive.')) break;
       await mutate(d => { d.claims = d.claims.filter(c => c.id !== id); for (const x of d.expenses) if (x.claimId === id) x.claimId = null; });
