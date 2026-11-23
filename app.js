@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.2',
+  version: '1.6.3',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -668,7 +668,7 @@ function homeView() {
         <div class="stat"><div class="k">Awaiting pay</div><div class="v num">${moneyS(waiting)}</div></div>
         <div class="stat"><div class="k">Paid ${yr}</div><div class="v num">${moneyS(paidYear)}</div></div>
       </div>
-      ${open.length ? `<button class="btn cta" data-a="send-open">📧 Send ${esc(monthLabel(periodOf(open).month).split(' ')[0])} expenses to ${esc(firstName())}</button>
+      ${open.length ? `<button class="btn cta" data-a="send-open">📧 Email ${esc(monthLabel(periodOf(open).month).split(' ')[0])} expenses…</button>
       <button class="linkbtn" data-a="new-claim" style="color:#FFC2A8;display:block;margin:8px auto 0">Choose which ones first</button>` : ''}
     </div>
     ${(() => { const k = new Date().getDate() <= 7 ? prevMonth(m) : m, have = sigmaFor(k);
@@ -763,7 +763,7 @@ function claimsView() {
     <div class="card" style="border-color:var(--acc)"><h3>Ready to claim</h3>
       <div class="claimcard" style="margin:0;border:0;padding:0;background:none"><div class="top"><span class="sum">${money(sum(open))}</span><span class="muted small">${plural(open.length, 'expense')}</span></div></div>
       ${pending.length ? `<div class="note warn">${plural(pending.length, 'repeating item')} still to confirm — they're left out until you confirm them.</div>` : ''}
-      <button class="btn" data-a="send-open" style="margin-top:12px" ${open.length ? '' : 'disabled'}>📧 Send to ${esc(firstName())}</button>
+      <button class="btn" data-a="send-open" style="margin-top:12px" ${open.length ? '' : 'disabled'}>📧 Email expenses…</button>
       <button class="btn sec" data-a="new-claim" style="margin-top:8px" ${open.length ? '' : 'disabled'}>Choose which ones first</button>
     </div>
     ${cs.map(c => { const [l, k, n] = claimStatus(c); return `<button class="claimcard" data-a="open-claim" data-id="${c.id}">
@@ -1354,7 +1354,7 @@ function openSend(claimId) {
   GMAIL.load().catch(() => {});
   openSheet('Send claim', `
     <div class="card" style="margin-top:12px">
-      <label class="field" style="margin-top:0"><span>To</span><input id="sendTo" type="email" inputmode="email" autocapitalize="off" value="${esc(S.sendFor.to)}" placeholder="name@example.com"></label>
+      <label class="field" style="margin-top:0"><span>Send to — type any email, or tap a name</span><input id="sendTo" type="email" inputmode="email" autocapitalize="off" value="${esc(S.sendFor.to)}" placeholder="name@example.com"></label>
       <div class="pills" style="margin-top:8px">${recipients().map(r => `<button data-a="send-to" data-k="${esc(r.email)}" class="${r.email.toLowerCase() === S.sendFor.to.toLowerCase() ? 'on' : ''}">${esc(r.label)}</button>`).join('')}</div>
     </div>
     <div class="card"><dl class="kv">
@@ -1367,7 +1367,7 @@ function openSend(claimId) {
       <div class="small" style="margin-top:8px">📗 Excel sheet &nbsp; 📕 Bills PDF &nbsp; 📝 Table in the email</div></div>
     ${noBill ? `<div class="note warn">${plural(noBill, 'expense')} without a bill — marked “No bill” in the sheet.</div>` : ''}
     ${pending.length ? `<div class="note warn">${plural(pending.length, 'repeating item')} not confirmed yet, so not included. <button class="linkbtn" data-a="send-confirm-all" style="padding:0;color:inherit;text-decoration:underline">Confirm and include them</button></div>` : ''}
-    ${ready ? `<button class="btn" data-a="send-now" style="margin-top:14px">📧 Send now</button>
+    ${ready ? `<button class="btn" data-a="send-now" style="margin-top:14px">📧 Send to the address above</button>
       <div class="small faint" style="text-align:center;margin-top:6px">${S.demo ? 'Sample data — nothing is really sent.' : 'Sent from your Gmail. Google may ask you to allow “send email” the first time.'}</div>`
     : `<div class="note">One-time setup needed so Billy can send from your Gmail. <button class="linkbtn" data-a="gmail-help" style="padding:0">How to set it up</button></div>`}
     <button class="btn sec" data-a="send-other" style="margin-top:8px">Send another way (Mail / share)</button>`);
@@ -1410,7 +1410,7 @@ async function sendNow(btn) {
     });
     progress(null); closeSheet(true); openClaim(id);
     toast(S.demo ? 'Sample — not really sent ✓' : `Sent to ${toName || sf.to} ✓`);
-  } catch (e) { progress(null); toast(`${step}: ${e.message}`); btn.disabled = false; btn.innerHTML = '📧 Send now'; }
+  } catch (e) { progress(null); toast(`${step}: ${e.message}`); btn.disabled = false; btn.innerHTML = '📧 Send to the address above'; }
 }
 async function claimLink(c) {
   const meta = await (await g(item(`Claims/${c.folder}/${c.files.pdf}`) + '?$select=id')).json();
