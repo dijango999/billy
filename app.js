@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.4',
+  version: '1.6.5',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1319,19 +1319,23 @@ function emailText(c, toName) {
 const firstName = () => (st().accountant || '').split(' ')[0] || 'accounts';
 function emailHtml(c, toName) {
   const list = c.expenseIds.map(id => S.data.expenses.find(x => x.id === id)).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-  const td = 'padding:6px 10px;border-bottom:1px solid #e5e3dd;font-size:13px;vertical-align:top';
-  const rows = list.map((x, i) => `<tr><td style="${td}">${i + 1}</td><td style="${td}">${esc(projectText(x))}</td><td style="${td};white-space:nowrap">${esc(shortDate(x.date))}</td><td style="${td}">${esc(x.reason || x.category)}</td><td style="${td};text-align:right;white-space:nowrap">${esc(money(+x.amount || 0))}</td><td style="${td};color:${x.bills.length ? '#1C7B62' : '#C53B3B'}">${x.bills.length ? 'Attached' : 'No bill'}</td></tr>`).join('');
-  const th = 'padding:7px 10px;background:#16181D;color:#fff;font-size:12px;text-align:left';
+  // Three narrow columns so it fits a phone: No. | what (project, description, date, bill) | amount
+  const td = 'padding:8px 6px;border-bottom:1px solid #e5e3dd;vertical-align:top;font-size:14px';
+  const rows = list.map((x, i) => `<tr>
+    <td style="${td};color:#676B73;width:22px">${i + 1}</td>
+    <td style="${td}"><b>${esc(projectText(x))}</b><br>${esc(x.reason || x.category)}<br><span style="color:#676B73;font-size:12px">${esc(shortDate(x.date))} · ${x.bills.length ? '<span style="color:#1C7B62">bill attached</span>' : '<span style="color:#C53B3B">no bill</span>'}</span></td>
+    <td style="${td};text-align:right;white-space:nowrap;font-weight:600">${esc(money(+x.amount || 0))}</td></tr>`).join('');
   const t = emailText(c, toName);
   const intro = t.body.split('\n\n')[1] || '';
-  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16181D;font-size:14px;line-height:1.5">
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16181D;font-size:15px;line-height:1.5;max-width:640px">
     <p>${(n => n ? 'Dear ' + esc(n) + ',' : 'Hello,')(toName === undefined ? firstName() : toName)}</p><p>${esc(intro)}</p>
-    <table style="border-collapse:collapse;margin:12px 0;min-width:520px"><tr><th style="${th}">No.</th><th style="${th}">Project</th><th style="${th}">Date</th><th style="${th}">Description</th><th style="${th};text-align:right">Amount</th><th style="${th}">Bill</th></tr>${rows}
-    <tr><td colspan="4" style="padding:8px 10px;font-weight:700;text-align:right;border-top:2px solid #E4572E">TOTAL</td><td style="padding:8px 10px;font-weight:700;text-align:right;white-space:nowrap;border-top:2px solid #E4572E">${esc(money(c.total))}</td><td style="border-top:2px solid #E4572E"></td></tr></table>
+    <table role="presentation" cellspacing="0" cellpadding="0" style="border-collapse:collapse;width:100%;max-width:640px;margin:12px 0">
+    <tr><th style="padding:6px;background:#16181D;color:#fff;font-size:12px;text-align:left">No.</th><th style="padding:6px;background:#16181D;color:#fff;font-size:12px;text-align:left">Expense</th><th style="padding:6px;background:#16181D;color:#fff;font-size:12px;text-align:right">Amount</th></tr>
+    ${rows}
+    <tr><td></td><td style="padding:10px 6px;font-weight:700;text-align:right;border-top:2px solid #E4572E">TOTAL</td><td style="padding:10px 6px;font-weight:700;text-align:right;white-space:nowrap;border-top:2px solid #E4572E">${esc(money(c.total))}</td></tr></table>
     <p>The Excel sheet and the bills PDF are attached. In the PDF the bills are in the same order — the BILL column of the sheet shows the page.</p>
     <p>Thank you,<br>${esc(st().name || '')}</p></div>`;
 }
-
 /** Quick choices for the To field: the accountant first, then yourself, then addresses used before. */
 function recipients() {
   const out = [], seen = new Set(), add = (email, label) => { const e = (email || '').trim(); if (!e || seen.has(e.toLowerCase())) return; seen.add(e.toLowerCase()); out.push({ email: e, label }); };
