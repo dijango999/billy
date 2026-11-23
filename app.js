@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.6',
+  version: '1.6.7',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1390,9 +1390,10 @@ async function sendNow(btn) {
       S.nc = { sel: new Set(sf.ids) };
       id = await makeClaim(null, true);
       if (!id) throw new Error('Could not make the claim.');
-    } else if (!S.blobs[id] || claimById(id).stale) {
-      if (claimById(id).stale || !claimById(id).files) { if (!(await buildClaimFiles(id))) throw new Error('Could not make the files.'); }
-      else { progress('Getting the files…'); await claimFiles(id); progress(null); }
+    } else {
+      // Always rebuild before sending, so the email carries the latest data and the latest sheet layout.
+      step = 'Making the Excel and bills PDF';
+      if (!(await buildClaimFiles(id))) throw new Error('Could not make the files.');
     }
     step = 'Preparing the email';
     const c = claimById(id), f = S.blobs[id], t = emailText(c, toName);
