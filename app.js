@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.3.1',
+  version: '1.3.2',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -1067,8 +1067,8 @@ function sigmaHtml() {
     <label class="btn" style="margin-top:8px">📅 Choose the Sigma Excel file<input type="file" accept=".xlsx,.xls,.csv" hidden data-sigmafile></label>
     ${g.err ? `<div class="note warn">${esc(g.err)}</div>` : ''}
     <div class="field" style="margin-top:16px"><span>…or paste</span>
-      <textarea id="sgText" rows="4" style="border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Paste the rows you copied from the Sigma Excel — or the whole My days page"></textarea></div>
-    <div style="display:flex;gap:8px;margin-top:8px">${navigator.clipboard?.readText ? `<button class="btn sec" data-a="sg-clip" style="flex:1">📋 Paste from clipboard</button>` : ''}<button class="btn sec" data-a="sg-read" style="flex:1">Read it</button></div>`;
+      <textarea id="sgText" rows="4" style="border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Long-press here → Paste. Works with the Excel file you copied from Sigma, copied rows, or the My days page"></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:8px">${navigator.clipboard?.readText || navigator.clipboard?.read ? `<button class="btn sec" data-a="sg-clip" style="flex:1">📋 Paste copied file</button>` : ''}<button class="btn sec" data-a="sg-read" style="flex:1">Read it</button></div>`;
   const months = [...new Set(g.days.map(d => mk(d.date)))].sort();
   const list = g.days.filter(d => mk(d.date) === g.month);
   const sel = list.filter(d => g.sel.has(d.date + d.project)), total = round2(sel.length * g.rate), had = sigmaFor(g.month);
@@ -1096,6 +1096,37 @@ function sigmaLoaded(days, file) {
   g.month = months.includes(thisMonth()) ? thisMonth() : months[months.length - 1];
   g.sel = new Set(count.filter(d => d.date <= today).map(d => d.date + d.project));
   redrawSheet(sigmaHtml());
+}
+
+/** A Sigma export as a file — picked, or pasted after "Copy" in the share sheet. */
+async function sigmaFromFile(f) {
+  try {
+    let days;
+    const name = f.name || 'Sigma export.xlsx';
+    if (/\.csv$/i.test(name) || /csv/.test(f.type)) days = SIGMA.fromPaste((await f.text()).split(/\r?\n/).map(l => l.split(',').join('\t')).join('\n'));
+    else if (/^text\//.test(f.type)) days = SIGMA.fromPaste(await f.text());
+    else {
+      const X = await LEARN.load(), wb = X.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
+      days = []; for (const n of wb.SheetNames) days.push(...SIGMA.fromRows(X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false })));
+    }
+    const file = f instanceof File ? f : new File([f], name, { type: f.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    sigmaLoaded(days, file);
+  } catch (e) { S.sg.err = 'Could not read that file: ' + e.message; S.sg.days = null; redrawSheet(sigmaHtml()); }
+}
+/** Reads whatever was copied: a whole Excel file (share sheet › Copy), copied cells, or page text. */
+async function sigmaFromClipboard() {
+  if (navigator.clipboard?.read) {
+    try {
+      for (const it of await navigator.clipboard.read()) {
+        const ft = it.types.find(t => /sheet|excel|officedocument|octet|csv|zip/.test(t));
+        if (ft) { await sigmaFromFile(new File([await it.getType(ft)], 'Sigma export.xlsx', { type: ft })); return; }
+        if (it.types.includes('text/plain')) { const t = await (await it.getType('text/plain')).text(); if (t.trim()) { sigmaLoaded(SIGMA.fromPaste(t), null); return; } }
+      }
+    } catch (e) { console.warn('clipboard.read', e); }
+  }
+  const t = await navigator.clipboard.readText();
+  if (!t.trim()) throw new Error('empty');
+  sigmaLoaded(SIGMA.fromPaste(t), null);
 }
 async function sigmaAdd(btn) {
   const g = S.sg, rate = num($('#sgRate', sheetEl)?.value) || g.rate;
@@ -1686,7 +1717,7 @@ async function onClick(e) {
     case 'send-open': openSend(null); break;
     case 'sigma': closeSheet(true); openSigma(); break;
     case 'sg-read': { const t = $('#sgText', sheetEl)?.value || ''; if (!t.trim()) { toast('Paste the copied rows first.'); break; } sigmaLoaded(SIGMA.fromPaste(t), null); break; }
-    case 'sg-clip': { try { const t = await navigator.clipboard.readText(); if (!t.trim()) { toast('The clipboard is empty — copy the rows in Sigma or Excel first.'); break; } sigmaLoaded(SIGMA.fromPaste(t), null); } catch { toast('Allow paste, or long-press the box and tap Paste.'); } break; }
+    case 'sg-clip': { try { await sigmaFromClipboard(); } catch { toast('Nothing to paste — in Sigma tap Copy on the file (or copy the rows), then try again. Or use “Choose the Sigma Excel file”.'); } break; }
     case 'sg-month': S.sg.month = k; S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; redrawSheet(sigmaHtml()); break;
     case 'sg-day': S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; S.sg.sel.has(k) ? S.sg.sel.delete(k) : S.sg.sel.add(k); redrawSheet(sigmaHtml()); break;
     case 'sg-add': await sigmaAdd(a); break;
@@ -1784,8 +1815,9 @@ async function onChange(e) {
     } catch (err) { toast(err.message); }
     return;
   }
-  if (t.matches('[data-sigmafile]') && t.files?.[0]) {
-    const f = t.files[0];
+  if (t.matches('[data-sigmafile]') && t.files?.[0]) { await sigmaFromFile(t.files[0]); return; }
+  if (false) {
+    const f = null;
     try {
       let days;
       if (/\.csv$/i.test(f.name)) days = SIGMA.fromPaste((await f.text()).split(/\r?\n/).map(l => l.split(',').join('\t')).join('\n'));
@@ -1823,6 +1855,8 @@ async function onChange(e) {
 let qTimer;
 document.addEventListener('paste', e => {
   if (e.target?.id !== 'sgText') return;
+  const f = [...(e.clipboardData?.files || [])][0];
+  if (f) { e.preventDefault(); sigmaFromFile(f); return; }
   setTimeout(() => { const t = $('#sgText', sheetEl)?.value || ''; if (t.trim()) sigmaLoaded(SIGMA.fromPaste(t), null); }, 50);
 }, true);
 function onInput(e) {
