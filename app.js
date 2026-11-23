@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.8',
+  version: '1.6.9',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -759,10 +759,11 @@ function claimsView() {
   const open = openItems(), pending = live().filter(x => x.pending);
   // Year and month filter (by the claim's month)
   const all = S.data.claims || [], cf = (S.cf ||= { year: '', month: '' });
-  const years = [...new Set(all.map(c => (c.month || mk(c.createdAt)).slice(0, 4)).filter(Boolean))].sort().reverse();
+  const cm = c => c.month || (c.imported ? '' : mk(c.createdAt));
+  const years = [...new Set(all.map(c => cm(c).slice(0, 4)).filter(Boolean))].sort().reverse();
   if (cf.year && !years.includes(cf.year)) { cf.year = ''; cf.month = ''; }
-  const monthsOfYear = cf.year ? [...new Set(all.map(c => c.month || mk(c.createdAt)).filter(m => m.startsWith(cf.year)))].sort().reverse() : [];
-  const pass = c => { const m = c.month || mk(c.createdAt); return (!cf.year || m.startsWith(cf.year)) && (!cf.month || m === cf.month); };
+  const monthsOfYear = cf.year ? [...new Set(all.map(cm).filter(m => m && m.startsWith(cf.year)))].sort().reverse() : [];
+  const pass = c => { const m = cm(c); if (!m) return !cf.year; return (!cf.year || m.startsWith(cf.year)) && (!cf.month || m === cf.month); };
   const cs = all.filter(c => !c.imported && pass(c)).sort((a, b) => (b.month || '').localeCompare(a.month || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
   const past = all.filter(c => c.imported && pass(c)).sort((a, b) => (b.month || '').localeCompare(a.month || ''));
   const shown = [...cs, ...past], tot = round2(shown.reduce((s, c) => s + (+c.total || 0), 0));
@@ -786,7 +787,8 @@ function claimsView() {
       ${c.stale && !c.sentAt ? '<div class="small" style="color:var(--warn);margin-top:6px">Changed since the files were made — open to update them.</div>' : ''}
     </button>`; }).join('') || (shown.length || (open.length && !years.length) ? '' : `<div class="empty">${years.length ? 'No claims for this period.' : 'No claims yet.'}</div>`)}
     ${past.length ? `<div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">Past sheets Billy learned from</h3><div class="list" style="border:0;border-radius:0;margin-top:4px">
-      ${past.map(c => `<button class="row" data-a="open-claim" data-id="${c.id}"><span class="ic">📗</span><span class="main"><span class="t">${esc(c.title)}</span><span class="s">${plural(c.expenseIds.length, 'item')}</span></span><span class="amt">${moneyS(c.total)}</span></button>`).join('')}</div></div>` : ''}`;
+      ${past.map(c => `<button class="row" data-a="open-claim" data-id="${c.id}"><span class="ic">📗</span><span class="main"><span class="t">${esc(c.title)}</span><span class="s">${c.month ? monthLabel(c.month) + ' · ' : '<span style="color:var(--warn)">month unknown</span> · '}${plural(c.expenseIds.length, 'item')}</span></span><span class="amt">${moneyS(c.total)}</span></button>`).join('')}</div>
+      ${past.some(c => !c.month) ? '<div class="small muted" style="padding:0 14px 14px">Sheets marked “month unknown” have no year in them. Tap <b>Learn from past sheets</b> in Settings and choose them again — Billy now works out the year from when the file was saved.</div>' : ''}</div>` : ''}`;
 }
 
 /* ---------------- Settings ---------------- */
@@ -1567,11 +1569,14 @@ async function learnFrom(sources) {
   const found = [];
   for (const [i, s] of sources.entries()) {
     progress(`Reading ${i + 1}/${sources.length}: ${s.name}`);
-    try { for (const sh of await LEARN.parse(s.buffer, s.name)) found.push({ src: s, sh }); } catch (e) { console.warn(s.name, e); }
+    try { for (const sh of await LEARN.parse(s.buffer, s.name, s.at || '')) found.push({ src: s, sh }); } catch (e) { console.warn(s.name, e); }
   }
   progress(null);
   if (!found.length) return toast('No expense rows were found in those sheets.');
-  const known = new Set(S.data.expenses.map(fp)), cats = S.data.categories.map(c => c.name);
+  // Reading a sheet again replaces what was learned from it before (e.g. after a fix to month detection).
+  const again = new Set(sources.map(s => s.name));
+  const oldIds = new Set(S.data.claims.filter(c => c.imported && again.has(c.source)).map(c => c.id));
+  const known = new Set(S.data.expenses.filter(x => !oldIds.has(x.claimId)).map(fp)), cats = S.data.categories.map(c => c.name);
   const newProjects = new Map(), claims = [], expenses = [], seen = new Set();
   for (const { src, sh } of found) {
     const cid = uuid(), ids = [];
@@ -1595,7 +1600,7 @@ async function learnFrom(sources) {
     }
     if (ids.length) {
       const month = sh.month ? `${sh.month.y}-${pad2(sh.month.m)}` : mk(expenses.find(x => x.id === ids[0])?.date);
-      claims.push({ id: cid, imported: true, title: sh.title || src.name.replace(/\.\w+$/, ''), month, period: monthLabel(month), source: src.name, expenseIds: ids,
+      claims.push({ id: cid, imported: true, title: sh.title || src.name.replace(/\.\w+$/, ''), month: month || '', period: month ? monthLabel(month) : 'Month unknown', source: src.name, expenseIds: ids,
         total: round2(expenses.filter(x => ids.includes(x.id)).reduce((a, x) => a + x.amount, 0)), createdAt: isoNow(), sentAt: `${month}-28`, paidAt: `${month}-28` });
     }
   }
@@ -1610,6 +1615,7 @@ async function learnFrom(sources) {
   const have = new Set(S.data.monthly.map(t => `${(t.label || '').toLowerCase()}|${(t.reason || '').toLowerCase()}`));
   const suggest = [...groups.entries()].filter(([k, gp]) => !have.has(k) && (MONTHLY_CATS.includes(gp.x.category) || gp.months.size >= 2)).map(([, gp]) => gp.last);
   const ok = await mutate(d => {
+    d.claims = d.claims.filter(c => !oldIds.has(c.id)); d.expenses = d.expenses.filter(x => !oldIds.has(x.claimId));
     for (const p of newProjects.values()) if (!d.projects.some(q => q.name.toLowerCase() === p.name.toLowerCase())) d.projects.push(p);
     d.expenses.push(...expenses); d.claims.push(...claims);
     for (const l of learned) if (!d.learned.some(z => z.id === l.id)) d.learned.push(l);
@@ -1858,7 +1864,7 @@ async function onClick(e) {
       const files = S.lr.files.filter(f => S.lr.sel.has(f.id)); a.disabled = true;
       try {
         const sources = [];
-        for (const [i, f] of files.entries()) { progress(`Downloading ${i + 1}/${files.length}`); const blob = await (await g(`/drives/${f.driveId}/items/${f.id}/content`)).blob(); sources.push({ id: f.id, name: f.name, buffer: new Uint8Array(await blob.arrayBuffer()) }); }
+        for (const [i, f] of files.entries()) { progress(`Downloading ${i + 1}/${files.length}`); const blob = await (await g(`/drives/${f.driveId}/items/${f.id}/content`)).blob(); sources.push({ id: f.id, name: f.name, at: f.at || '', buffer: new Uint8Array(await blob.arrayBuffer()) }); }
         progress(null); await learnFrom(sources);
       } catch (err) { progress(null); toast(err.message); a.disabled = false; }
       break;
@@ -1909,7 +1915,7 @@ async function onChange(e) {
   const t = e.target;
   if (t.matches('[data-addfile]') && t.files?.length) { await addFiles([...t.files]); return; }
   if (t.matches('[data-learnfiles]') && t.files?.length) {
-    const sources = []; for (const f of t.files) sources.push({ id: 'local:' + f.name, name: f.name, buffer: new Uint8Array(await f.arrayBuffer()) });
+    const sources = []; for (const f of t.files) sources.push({ id: 'local:' + f.name, name: f.name, at: f.lastModified ? ymd(new Date(f.lastModified)) : '', buffer: new Uint8Array(await f.arrayBuffer()) });
     await learnFrom(sources); return;
   }
   if (t.dataset.addbill && t.files?.length) {

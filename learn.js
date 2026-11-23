@@ -41,7 +41,13 @@ const LEARN = (() => {
   };
 
   /** Returns [{ sheet, title, month:{y,m}, rows:[{ project, date, dateText, reason, amount, category }] }] */
-  async function parse(buffer, fileName = '') {
+  /** A month written without a year ("DEC", "Sept") → month number. */
+  function monthWord(text) {
+    const m = /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.exec(text || '');
+    return m ? monthOf(m[1]) : 0;
+  }
+  /** fileDate: when the file was last saved (YYYY-MM-DD…), used to work out the year when the sheet only says "DEC". */
+  async function parse(buffer, fileName = '', fileDate = '') {
     const X = await load();
     const wb = X.read(buffer, { type: 'array', cellDates: true });
     const out = [];
@@ -57,7 +63,15 @@ const LEARN = (() => {
       if (h < 0) continue;
       const before = aoa.slice(0, h).flat().map(str).filter(Boolean).join(' ');
       const title = aoa.slice(0, h).flat().map(str).find(s => /[a-z]{3,}/i.test(s)) || '';
-      const month = findMonth(before) || findMonth(fileName) || findMonth(name);
+      let month = findMonth(before) || findMonth(fileName) || findMonth(name);
+      if (!month) {
+        const mw = monthWord(before) || monthWord(fileName) || monthWord(name);
+        // the year: from real dates in the sheet, else from when the file was saved (a December sheet saved in January is last year's)
+        const ys = {}; for (let i = h + 1; i < aoa.length; i++) for (const v of aoa[i] || []) if (v instanceof Date) { const y = v.getFullYear(); if (y > 2000) ys[y] = (ys[y] || 0) + 1; }
+        let y = +Object.entries(ys).sort((a, b) => b[1] - a[1])[0]?.[0] || 0;
+        if (!y && mw && /^\d{4}-\d{2}/.test(fileDate)) { const fy = +fileDate.slice(0, 4), fm = +fileDate.slice(5, 7); y = mw > fm + 1 ? fy - 1 : fy; }
+        if (mw && y) month = { y, m: mw };
+      }
       const rows = [];
       for (let i = h + 1; i < aoa.length; i++) {
         const r = aoa[i] || [];

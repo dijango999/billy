@@ -1,6 +1,6 @@
 // Keeps the app itself available offline. Your data always comes from OneDrive.
-const CACHE = 'billy-v17';
-const SHELL = ['./', 'index.html', 'scan.js?v=1.6.8', 'learn.js?v=1.6.8', 'sigma.js?v=1.6.8', 'claim.js?v=1.6.8', 'gmail.js?v=1.6.8', 'app.js?v=1.6.8', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/billy-icon.svg', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'billy-v18';
+const SHELL = ['./', 'index.html', 'scan.js?v=1.6.9', 'learn.js?v=1.6.9', 'sigma.js?v=1.6.9', 'claim.js?v=1.6.9', 'gmail.js?v=1.6.9', 'app.js?v=1.6.9', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/billy-icon.svg', 'icons/icon-maskable-512.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))));
