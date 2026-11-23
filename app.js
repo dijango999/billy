@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.0.0',
+  version: '1.1.0',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -232,7 +232,7 @@ function normalize(d) {
   d.projects ||= []; d.expenses ||= []; d.claims ||= []; d.monthly ||= []; d.learned ||= [];
   if (!d.categories?.length) d.categories = CATS.map(c => ({ ...c }));
   for (const c of CATS) if (!d.categories.some(x => x.name === c.name)) d.categories.push({ ...c });
-  d.settings = { name: '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50, ...(d.settings || {}) };
+  d.settings = { name: '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50, fromEmail: '', cc: '', googleClientId: '', ...(d.settings || {}) };
   for (const x of d.expenses) { x.bills ||= []; x.currency ||= d.settings.currency; }
   return d;
 }
@@ -599,7 +599,7 @@ function folderView() {
     <div id="fb"></div></main>`;
 }
 function setupView() {
-  const su = (S.setup ||= { name: ls.get('by.displayName') || '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', projects: '' });
+  const su = (S.setup ||= { name: ls.get('by.displayName') || '', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', fromEmail: 'shaheer@choppershoot.com', projects: '' });
   return `<header class="top"><div class="topbar"><h1>Welcome to Billy</h1></div></header>
     <main>
       <div class="card"><h3>You</h3>
@@ -609,6 +609,7 @@ function setupView() {
       <div class="card"><h3>Accounts</h3>
         <label class="field"><span>Accountant</span><input data-su="accountant" value="${esc(su.accountant)}"></label>
         <label class="field"><span>Send claims to</span><input data-su="email" type="email" value="${esc(su.email)}"></label>
+        <label class="field"><span>Send from (your Gmail)</span><input data-su="fromEmail" type="email" value="${esc(su.fromEmail)}"></label>
         <label class="field"><span>Company</span><input data-su="company" value="${esc(su.company)}"></label>
       </div>
       <div class="card"><h3>Projects you're working on <span class="grow"></span><span class="faint" style="text-transform:none;letter-spacing:0;font-weight:500">optional</span></h3>
@@ -651,7 +652,8 @@ function homeView() {
         <div class="stat"><div class="k">Awaiting pay</div><div class="v num">${moneyS(waiting)}</div></div>
         <div class="stat"><div class="k">Paid ${yr}</div><div class="v num">${moneyS(paidYear)}</div></div>
       </div>
-      ${open.length ? `<button class="btn cta" data-a="new-claim">Prepare claim for Adnan →</button>` : ''}
+      ${open.length ? `<button class="btn cta" data-a="send-open">📧 Send ${esc(monthLabel(periodOf(open).month).split(' ')[0])} expenses to ${esc(firstName())}</button>
+      <button class="linkbtn" data-a="new-claim" style="color:#FFC2A8;display:block;margin:8px auto 0">Choose which ones first</button>` : ''}
     </div>
     ${pending.length ? `<div class="card"><h3>🔁 Monthly items · ${monthLabel(m)}</h3>
       <div class="small muted" style="margin:-4px 0 8px">Filled in with last month's amounts. Tap one to change the amount or attach the bill.</div>
@@ -734,7 +736,8 @@ function claimsView() {
     <div class="card" style="border-color:var(--acc)"><h3>Ready to claim</h3>
       <div class="claimcard" style="margin:0;border:0;padding:0;background:none"><div class="top"><span class="sum">${money(sum(open))}</span><span class="muted small">${plural(open.length, 'expense')}</span></div></div>
       ${pending.length ? `<div class="note warn">${plural(pending.length, 'monthly item')} still to confirm — they're left out until you confirm them.</div>` : ''}
-      <button class="btn" data-a="new-claim" style="margin-top:12px" ${open.length ? '' : 'disabled'}>Prepare claim for ${esc(st().accountant?.split(' ')[0] || 'accounts')}</button>
+      <button class="btn" data-a="send-open" style="margin-top:12px" ${open.length ? '' : 'disabled'}>📧 Send to ${esc(firstName())}</button>
+      <button class="btn sec" data-a="new-claim" style="margin-top:8px" ${open.length ? '' : 'disabled'}>Choose which ones first</button>
     </div>
     ${cs.map(c => { const [l, k, n] = claimStatus(c); return `<button class="claimcard" data-a="open-claim" data-id="${c.id}">
       <div class="top"><span class="ttl">${esc(c.title)}</span><span class="chip ${k}">${l}</span></div>
@@ -758,6 +761,12 @@ function settingsView() {
       <label class="field"><span>Send claims to</span><input data-set="email" type="email" value="${esc(s.email)}"></label>
       <div class="two"><label class="field"><span>Shoot day rate (${esc(base())})</span><input data-set="dayRate" inputmode="decimal" value="${esc(s.dayRate)}"></label>
       <label class="field"><span>Currency</span><select data-set="currency">${CURRENCIES.map(c => `<option ${c === s.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label></div>
+    </div>
+    <div class="card"><h3>📧 Email to accounts</h3>
+      <div class="two"><label class="field"><span>Send from (your Gmail)</span><input data-set="fromEmail" type="email" value="${esc(s.fromEmail)}" placeholder="shaheer@choppershoot.com"></label>
+      <label class="field"><span>Cc (optional)</span><input data-set="cc" type="email" value="${esc(s.cc)}" placeholder="e.g. yourself"></label></div>
+      <label class="field"><span>Google Client ID ${s.googleClientId ? '· ✓ set' : ''}</span><input data-set="googleClientId" value="${esc(s.googleClientId)}" placeholder="….apps.googleusercontent.com" autocapitalize="off" spellcheck="false"></label>
+      <button class="linkbtn" data-a="gmail-help" style="margin-top:6px">How to get the Client ID (once, 5 minutes)</button>
     </div>
     <div class="card" style="padding:0;overflow:hidden"><h3 style="padding:14px 14px 0">🔁 Monthly items<span class="grow"></span><button class="linkbtn" data-a="monthly-new" style="text-transform:none;letter-spacing:0">＋ Add</button></h3>
       <div class="small muted" style="padding:0 14px">Billy adds these at the start of every month with the last amount, for you to confirm.</div>
@@ -1047,22 +1056,24 @@ function periodOf(list) {
 }
 const claimTitle = p => `${st().name || 'My'} ${p.label} Expenses`.replace(/\s+/g, ' ').trim();
 
-async function makeClaim(btn) {
+async function makeClaim(btn, quiet) {
   const ids = [...S.nc.sel], list = S.data.expenses.filter(x => ids.includes(x.id));
-  if (!list.length) return;
+  if (!list.length) return null;
   const p = periodOf(list), id = uuid();
   const n = S.data.claims.filter(c => !c.imported && c.month === p.month).length;
   const title = claimTitle(p) + (n ? ` (${n + 1})` : '');
-  btn.disabled = true;
+  if (btn) btn.disabled = true;
   const ok = await mutate(d => {
     d.claims.push({ id, title, month: p.month, period: p.label, expenseIds: ids, total: sum(list), createdAt: isoNow(), folder: `${p.month} ${cleanName(title)}` });
     for (const x of d.expenses) if (ids.includes(x.id)) x.claimId = id;
   });
-  if (!ok) { btn.disabled = false; return; }
+  if (!ok) { if (btn) btn.disabled = false; return null; }
+  if (quiet) return (await buildClaimFiles(id)) ? id : null;
   closeSheet(true);
   const built = await buildClaimFiles(id);
   openClaim(id);
   if (built) toast('Claim ready ✓');
+  return id;
 }
 /** Makes the Excel sheet and the bills PDF and saves both in Claims/<folder>/ in OneDrive. */
 async function buildClaimFiles(id) {
@@ -1119,6 +1130,101 @@ function emailText(c) {
     body: `Dear ${first},\n\nPlease find attached my expenses for ${c.period}: ${plural(list.length, 'item')}, total ${money(c.total)}.\n\n${lines}\n\nThe Excel sheet lists every expense. The bills PDF has the bills in the same order — the BILL column shows the page.${noBill ? `\n${plural(noBill, 'item')} without a bill.` : ''}\n\nThank you,\n${st().name || ''}`,
   };
 }
+
+/* ---------------- one-click email to accounts (Gmail) ---------------- */
+const firstName = () => (st().accountant || '').split(' ')[0] || 'accounts';
+function emailHtml(c) {
+  const list = c.expenseIds.map(id => S.data.expenses.find(x => x.id === id)).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const td = 'padding:6px 10px;border-bottom:1px solid #e5e3dd;font-size:13px;vertical-align:top';
+  const rows = list.map((x, i) => `<tr><td style="${td}">${i + 1}</td><td style="${td}">${esc(projectText(x))}</td><td style="${td};white-space:nowrap">${esc(shortDate(x.date))}</td><td style="${td}">${esc(x.reason || x.category)}</td><td style="${td};text-align:right;white-space:nowrap">${esc(money(+x.amount || 0))}</td><td style="${td};color:${x.bills.length ? '#1C7B62' : '#C53B3B'}">${x.bills.length ? 'Attached' : 'No bill'}</td></tr>`).join('');
+  const th = 'padding:7px 10px;background:#16181D;color:#fff;font-size:12px;text-align:left';
+  const t = emailText(c);
+  const intro = t.body.split('\n\n')[1] || '';
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#16181D;font-size:14px;line-height:1.5">
+    <p>Dear ${esc(firstName())},</p><p>${esc(intro)}</p>
+    <table style="border-collapse:collapse;margin:12px 0;min-width:520px"><tr><th style="${th}">No.</th><th style="${th}">Project</th><th style="${th}">Date</th><th style="${th}">Description</th><th style="${th};text-align:right">Amount</th><th style="${th}">Bill</th></tr>${rows}
+    <tr><td colspan="4" style="padding:8px 10px;font-weight:700;text-align:right;border-top:2px solid #E4572E">TOTAL</td><td style="padding:8px 10px;font-weight:700;text-align:right;white-space:nowrap;border-top:2px solid #E4572E">${esc(money(c.total))}</td><td style="border-top:2px solid #E4572E"></td></tr></table>
+    <p>The Excel sheet and the bills PDF are attached. In the PDF the bills are in the same order — the BILL column of the sheet shows the page.</p>
+    <p>Thank you,<br>${esc(st().name || '')}</p></div>`;
+}
+/** Opens the "send to accounts" check screen. claimId = existing claim, or null to claim everything that is waiting. */
+function openSend(claimId) {
+  const c = claimId ? claimById(claimId) : null;
+  const list = c ? c.expenseIds.map(id => S.data.expenses.find(x => x.id === id)).filter(Boolean) : openItems();
+  if (!list.length) return toast('Nothing to send yet.');
+  const pending = c ? [] : live().filter(x => x.pending);
+  const p = c ? { label: c.period } : periodOf(list), title = c ? c.title : claimTitle(p), noBill = list.filter(x => !x.bills.length).length;
+  const ready = !!st().googleClientId || S.demo;
+  S.sendFor = { claimId, ids: list.map(x => x.id) };
+  GMAIL.load().catch(() => {});
+  openSheet('Send to ' + firstName(), `
+    <div class="card" style="margin-top:12px"><dl class="kv">
+      <dt>To</dt><dd>${esc(st().accountant)} &lt;${esc(st().email)}&gt;</dd>
+      <dt>From</dt><dd>${esc(st().fromEmail || 'your Gmail')}</dd>
+      ${st().cc ? `<dt>Cc</dt><dd>${esc(st().cc)}</dd>` : ''}
+      <dt>Subject</dt><dd style="font-weight:500">${esc(title)} — ${esc(money(sum(list)))}</dd>
+    </dl></div>
+    <div class="card" style="text-align:center"><div class="serif num" style="font-size:32px;font-weight:700">${money(sum(list))}</div>
+      <div class="small muted">${plural(list.length, 'expense')} · ${esc(p.label)}</div>
+      <div class="small" style="margin-top:8px">📗 Excel sheet &nbsp; 📕 Bills PDF &nbsp; 📝 Table in the email</div></div>
+    ${noBill ? `<div class="note warn">${plural(noBill, 'expense')} without a bill — marked “No bill” in the sheet.</div>` : ''}
+    ${pending.length ? `<div class="note warn">${plural(pending.length, 'monthly item')} not confirmed yet, so not included. <button class="linkbtn" data-a="send-confirm-all" style="padding:0;color:inherit;text-decoration:underline">Confirm and include them</button></div>` : ''}
+    ${ready ? `<button class="btn" data-a="send-now" style="margin-top:14px">📧 Send now</button>
+      <div class="small faint" style="text-align:center;margin-top:6px">${S.demo ? 'Sample data — nothing is really sent.' : 'Sent from your Gmail. Google may ask you to allow “send email” the first time.'}</div>`
+    : `<div class="note">One-time setup needed so Billy can send from your Gmail. <button class="linkbtn" data-a="gmail-help" style="padding:0">How to set it up</button></div>`}
+    <button class="btn sec" data-a="send-other" style="margin-top:8px">Send another way (Mail / share)</button>`);
+}
+async function sendNow(btn) {
+  const sf = S.sendFor; if (!sf) return;
+  let tok = null;
+  btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px"></span> Sending…';
+  try {
+    if (!S.demo) tok = await GMAIL.authorize(st().googleClientId, st().fromEmail);   // first, while the tap still counts
+    let id = sf.claimId;
+    if (!id) {
+      S.nc = { sel: new Set(sf.ids) };
+      id = await makeClaim(null, true);
+      if (!id) throw new Error('Could not make the claim.');
+    } else if (!S.blobs[id] || claimById(id).stale) {
+      if (claimById(id).stale || !claimById(id).files) { if (!(await buildClaimFiles(id))) throw new Error('Could not make the files.'); }
+      else { progress('Getting the files…'); await claimFiles(id); progress(null); }
+    }
+    const c = claimById(id), f = S.blobs[id], t = emailText(c);
+    let files = [f.xlsx, f.pdf], html = emailHtml(c), text = t.body;
+    if (GMAIL.tooBig(files) && !S.demo) {     // bills too large for an attachment: send a OneDrive link instead
+      progress('Bills PDF is large — adding a OneDrive link…');
+      const link = await claimLink(c);
+      files = [f.xlsx];
+      text = text.replace('The Excel sheet', `Bills PDF (too large to attach): ${link}\n\nThe Excel sheet`);
+      html = html.replace('<p>The Excel sheet and the bills PDF are attached.', `<p>The Excel sheet is attached. The bills PDF is too large to attach — <a href="${link}">open it in OneDrive</a>.`);
+    }
+    progress('Sending to ' + firstName() + '…');
+    let msgId = 'demo';
+    if (!S.demo) msgId = await GMAIL.send(tok, { from: st().fromEmail, to: `${st().accountant} <${st().email}>`, cc: st().cc, subject: t.subject, text, html, files });
+    await mutate(d => { const k = d.claims.find(z => z.id === id); if (k) { k.sentAt = todayStr(); k.sentVia = 'gmail'; k.messageId = msgId; k.sentTo = st().email; } });
+    progress(null); closeSheet(true); openClaim(id);
+    toast(S.demo ? 'Sample — not really sent ✓' : `Sent to ${firstName()} ✓`);
+  } catch (e) { progress(null); toast(e.message); btn.disabled = false; btn.innerHTML = '📧 Send now'; }
+}
+async function claimLink(c) {
+  const meta = await (await g(item(`Claims/${c.folder}/${c.files.pdf}`) + '?$select=id')).json();
+  const l = (await (await g(`/drives/${LOC.driveId}/items/${meta.id}/createLink`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'view', scope: 'anonymous' }) })).json()).link?.webUrl;
+  if (!l) throw new Error('OneDrive did not give a link.');
+  return l;
+}
+function openGmailHelp() {
+  openSheet('Send from your Gmail', `
+    <div class="note" style="margin-top:12px">Done once. It lets Billy send the claim from <b>${esc(st().fromEmail || 'your work Gmail')}</b>. Billy can only <b>send</b> — it can't read your mail.</div>
+    <ol style="padding-left:20px;line-height:1.6;font-size:14.5px">
+      <li>Open <b>console.cloud.google.com</b> signed in as ${esc(st().fromEmail || 'your work account')} and create a project called <b>Billy</b>.</li>
+      <li><b>APIs &amp; Services → Library</b> → turn on <b>Gmail API</b>.</li>
+      <li><b>OAuth consent screen</b> → user type <b>Internal</b> → app name Billy → save.</li>
+      <li><b>Credentials → Create credentials → OAuth client ID → Web application</b>. Under <b>Authorised JavaScript origins</b> add <code>https://dijango999.github.io</code>. Create.</li>
+      <li>Copy the <b>Client ID</b> (ends with .apps.googleusercontent.com) and paste it in Billy → Settings → Email to accounts.</li>
+    </ol>
+    <button class="btn" data-a="close-to-settings">Go to Settings</button>`);
+}
+
 function openClaim(id) {
   const c = claimById(id); if (!c) return;
   const list = c.expenseIds.map(eid => S.data.expenses.find(x => x.id === eid)).filter(Boolean).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -1143,9 +1249,10 @@ function openClaim(id) {
         <button class="row" data-a="claim-file" data-id="${id}" data-k="xlsx"><span class="ic">📗</span><span class="main"><span class="t">${esc(c.files.xlsx)}</span><span class="s">Excel · same layout as your monthly sheet</span></span><span class="faint">›</span></button>
         <button class="row" data-a="claim-file" data-id="${id}" data-k="pdf"><span class="ic">📕</span><span class="main"><span class="t">${esc(c.files.pdf)}</span><span class="s">All bills in order${c.noBill ? ` · ${c.noBill} without bill` : ''}</span></span><span class="faint">›</span></button>
       </div></div>
-    <button class="btn" data-a="share-claim" data-id="${id}" style="margin-top:14px" ${ready || !canShare ? '' : 'disabled'}>${ready || !canShare ? `📤 Send to ${esc(st().accountant?.split(' ')[0] || 'accounts')}` : '<span class="spin" style="width:16px;height:16px"></span> Getting files ready…'}</button>
-    <div class="small faint" style="text-align:center;margin-top:6px">Opens Mail (or Outlook / Gmail) with both files attached, addressed to ${esc(st().email)}.</div>
+    ${c.sentVia === 'gmail' ? `<div class="note" style="background:var(--goodSoft);color:var(--good)">📧 Emailed to ${esc(c.sentTo || st().email)} on ${shortDate(c.sentAt)}.</div>` : ''}
+    <button class="btn ${c.sentAt ? 'sec' : ''}" data-a="send-claim" data-id="${id}" style="margin-top:14px">📧 ${c.sentAt ? 'Send again' : 'Send to ' + esc(firstName())}</button>
     <div class="actions">
+      <button class="btn sec" data-a="share-claim" data-id="${id}" ${ready || !canShare ? '' : 'disabled'}>📤 Share / Mail app</button>
       ${S.demo ? '' : `<button class="btn sec" data-a="email-link" data-id="${id}">✉︎ Email a OneDrive link</button>`}
       <button class="btn sec" data-a="copy-email" data-id="${id}">Copy email text</button>
     </div>`}
@@ -1396,7 +1503,7 @@ function sampleData() {
   ];
   const oldIds = ex.filter(x => x.claimId === oldClaim).map(x => x.id);
   return normalize({
-    settings: { name: 'Shaheer V', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50 },
+    settings: { name: 'Shaheer V', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50, fromEmail: 'shaheer@choppershoot.com' },
     projects: [dh, em, sr], monthly, expenses: ex,
     claims: [{ id: oldClaim, title: `Shaheer V ${monthLabel(pm)} Expenses`, month: pm, period: monthLabel(pm), expenseIds: oldIds, total: sum(ex.filter(x => oldIds.includes(x.id))),
       createdAt: `${m}-02T09:00:00Z`, sentAt: `${m}-02`, paidAt: null, folder: `${pm} demo`, files: null }],
@@ -1468,6 +1575,13 @@ async function onClick(e) {
     case 'rebuild': closeSheet(true); if (await buildClaimFiles(id)) toast('Files updated ✓'); openClaim(id); break;
     case 'claim-file': { const f = S.blobs[id] || await claimFiles(id).catch(err => { toast(err.message); return null; }); if (f) { k === 'pdf' ? viewBlob(f.pdf, f.pdf.name) : downloadFile(f.xlsx); } break; }
     case 'share-claim': await shareClaim(id); break;
+    case 'send-open': openSend(null); break;
+    case 'send-claim': openSend(id); break;
+    case 'send-now': await sendNow(a); break;
+    case 'send-confirm-all': await mutateFast(d => { for (const x of d.expenses) delete x.pending; }); closeSheet(true); openSend(null); break;
+    case 'send-other': { const sf = S.sendFor; closeSheet(true); if (sf.claimId) { await shareClaim(sf.claimId); } else { S.nc = { sel: new Set(sf.ids) }; const cid = await makeClaim(null, true); if (cid) openClaim(cid); } break; }
+    case 'gmail-help': openGmailHelp(); break;
+    case 'close-to-settings': closeSheet(); S.tab = 'settings'; render(); break;
     case 'email-link': await emailLink(id); break;
     case 'copy-email': { const m = emailText(claimById(id)); try { await navigator.clipboard.writeText(`To: ${st().email}\nSubject: ${m.subject}\n\n${m.body}`); toast('Email text copied ✓'); } catch { toast('Could not copy'); } break; }
     case 'sent': await mutateFast(d => { const c = d.claims.find(z => z.id === id); if (c) c.sentAt = todayStr(); }); closeSheet(true); openClaim(id); break;
@@ -1524,7 +1638,7 @@ async function finishSetup(btn) {
   if (!su.name.trim()) return toast('Add your name — it goes on the claim sheet.');
   btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px"></span>';
   const d = normalize({
-    settings: { name: su.name.trim(), accountant: su.accountant.trim(), email: su.email.trim(), company: su.company.trim() },
+    settings: { name: su.name.trim(), accountant: su.accountant.trim(), email: su.email.trim(), company: su.company.trim(), fromEmail: su.fromEmail.trim() },
     projects: su.projects.split('\n').map(s => s.trim()).filter(Boolean).map(name => ({ id: uuid(), name, createdAt: isoNow() })),
     createdAt: isoNow(),
   });
