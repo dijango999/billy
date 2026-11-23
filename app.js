@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.3.0',
+  version: '1.3.1',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -1066,10 +1066,9 @@ function sigmaHtml() {
     </ol>
     <label class="btn" style="margin-top:8px">📅 Choose the Sigma Excel file<input type="file" accept=".xlsx,.xls,.csv" hidden data-sigmafile></label>
     ${g.err ? `<div class="note warn">${esc(g.err)}</div>` : ''}
-    <details style="margin-top:14px"><summary class="small muted" style="cursor:pointer">No file? Paste the My days page instead</summary>
-      <div class="small muted" style="margin-top:6px">On the My days page select everything (⌘A / long-press → Select All), copy, and paste it here.</div>
-      <textarea id="sgText" rows="5" style="width:100%;margin-top:8px;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Paste here"></textarea>
-      <button class="btn sec" data-a="sg-read" style="margin-top:8px">Read the pasted page</button></details>`;
+    <div class="field" style="margin-top:16px"><span>…or paste</span>
+      <textarea id="sgText" rows="4" style="border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Paste the rows you copied from the Sigma Excel — or the whole My days page"></textarea></div>
+    <div style="display:flex;gap:8px;margin-top:8px">${navigator.clipboard?.readText ? `<button class="btn sec" data-a="sg-clip" style="flex:1">📋 Paste from clipboard</button>` : ''}<button class="btn sec" data-a="sg-read" style="flex:1">Read it</button></div>`;
   const months = [...new Set(g.days.map(d => mk(d.date)))].sort();
   const list = g.days.filter(d => mk(d.date) === g.month);
   const sel = list.filter(d => g.sel.has(d.date + d.project)), total = round2(sel.length * g.rate), had = sigmaFor(g.month);
@@ -1086,11 +1085,11 @@ function sigmaHtml() {
     ${list.some(d => d.date > today) ? `<div class="small muted" style="margin-top:6px">Upcoming days are left out — tick them if they're done by the time you send.</div>` : ''}
     <label class="field"><span>Rate per shoot day (${esc(base())})</span><input id="sgRate" inputmode="decimal" value="${esc(g.rate)}"></label>
     <button class="btn" data-a="sg-add" style="margin-top:14px" ${sel.length ? '' : 'disabled'}>${had ? 'Update' : 'Add'} ${plural(sel.length, 'shoot day')} · ${money(total)}</button>
-    <button class="btn sec" data-a="sg-again" style="margin-top:8px">Choose a different file</button>`;
+    <button class="btn sec" data-a="sg-again" style="margin-top:8px">Start again</button>`;
 }
 function sigmaLoaded(days, file) {
   const g = S.sg;
-  if (!days.length) { g.err = 'No shoot days were found. Make sure it is the My days export from Sigma.'; g.days = null; redrawSheet(sigmaHtml()); return; }
+  if (!days.length) { g.err = 'No shoot days were found. Use the My days export from Sigma, or copy rows that include the date and the project.'; g.days = null; redrawSheet(sigmaHtml()); return; }
   const count = days.filter(SIGMA.counts), months = [...new Set(count.map(d => mk(d.date)))].sort();
   const today = todayStr();
   g.days = count; g.file = file; g.err = '';
@@ -1686,7 +1685,8 @@ async function onClick(e) {
     case 'share-claim': await shareClaim(id); break;
     case 'send-open': openSend(null); break;
     case 'sigma': closeSheet(true); openSigma(); break;
-    case 'sg-read': { const t = $('#sgText', sheetEl)?.value || ''; sigmaLoaded(SIGMA.fromText(t), null); break; }
+    case 'sg-read': { const t = $('#sgText', sheetEl)?.value || ''; if (!t.trim()) { toast('Paste the copied rows first.'); break; } sigmaLoaded(SIGMA.fromPaste(t), null); break; }
+    case 'sg-clip': { try { const t = await navigator.clipboard.readText(); if (!t.trim()) { toast('The clipboard is empty — copy the rows in Sigma or Excel first.'); break; } sigmaLoaded(SIGMA.fromPaste(t), null); } catch { toast('Allow paste, or long-press the box and tap Paste.'); } break; }
     case 'sg-month': S.sg.month = k; S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; redrawSheet(sigmaHtml()); break;
     case 'sg-day': S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; S.sg.sel.has(k) ? S.sg.sel.delete(k) : S.sg.sel.add(k); redrawSheet(sigmaHtml()); break;
     case 'sg-add': await sigmaAdd(a); break;
@@ -1788,7 +1788,7 @@ async function onChange(e) {
     const f = t.files[0];
     try {
       let days;
-      if (/\.csv$/i.test(f.name)) days = SIGMA.fromText((await f.text()).split(/\r?\n/).map(l => l.split(',').join('\n')).join('\n'));
+      if (/\.csv$/i.test(f.name)) days = SIGMA.fromPaste((await f.text()).split(/\r?\n/).map(l => l.split(',').join('\t')).join('\n'));
       else {
         const X = await LEARN.load(), wb = X.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
         days = []; for (const n of wb.SheetNames) days.push(...SIGMA.fromRows(X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false })));
@@ -1821,6 +1821,10 @@ async function onChange(e) {
   }
 }
 let qTimer;
+document.addEventListener('paste', e => {
+  if (e.target?.id !== 'sgText') return;
+  setTimeout(() => { const t = $('#sgText', sheetEl)?.value || ''; if (t.trim()) sigmaLoaded(SIGMA.fromPaste(t), null); }, 50);
+}, true);
 function onInput(e) {
   const t = e.target;
   if (t.dataset?.su != null) { S.setup[t.dataset.su] = t.value; return; }
