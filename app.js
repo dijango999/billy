@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.3.2',
+  version: '1.4.0',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -581,6 +581,7 @@ function renderNow() {
   const body = { expenses: expensesView, projects: projectsView, claims: claimsView, settings: settingsView }[S.tab]?.() ?? homeView();
   const html = `
     <header class="top"><div class="topbar"><h1>${title}</h1>
+      <button class="iconbtn" data-a="refresh" title="Refresh">${S.refreshing ? '<span class="spin" style="width:16px;height:16px"></span>' : '↻'}</button>
       <button class="iconbtn" data-a="theme-toggle" title="Light / dark">${isDark() ? '☀️' : '🌙'}</button>
       <button class="iconbtn" data-a="settings" title="Settings" style="${S.tab === 'settings' ? 'color:var(--acc);border-color:var(--acc)' : ''}"><span style="width:19px;height:19px;display:block">${ICON.gear}</span></button>
     </div><div class="sync" id="syncline">${syncLine()}</div></header>
@@ -659,7 +660,7 @@ function homeView() {
     <div class="hero">
       <div class="lbl">Ready to claim</div>
       <div class="big num">${money(sum(open))}</div>
-      <div class="sub">${open.length ? `${plural(open.length, 'expense')}${noBill ? ` · <b>${noBill} without a bill</b>` : ' · all bills attached'}` : 'Nothing waiting — add an expense or snap a bill.'}${pending.length ? ` · ${pending.length} monthly to confirm` : ''}</div>
+      <div class="sub">${open.length ? `${plural(open.length, 'expense')}${noBill ? ` · <b>${noBill} without a bill</b>` : ' · all bills attached'}` : 'Nothing waiting — add an expense or snap a bill.'}${pending.length ? ` · ${pending.length}` + " repeating to confirm" : ''}</div>
       <div class="stats">
         <div class="stat"><div class="k">${MONTH_NAMES[+m.slice(5) - 1]}</div><div class="v num">${moneyS(monthSpent)}</div></div>
         <div class="stat"><div class="k">Awaiting pay</div><div class="v num">${moneyS(waiting)}</div></div>
@@ -1664,6 +1665,7 @@ async function onClick(e) {
     case 'demo': S.demo = true; ls.set('by.demo', '1'); applyData(sampleData(), null); ls.set('by.demoData', JSON.stringify(S.data)); ensureMonthly(); break;
     case 'setup-done': await finishSetup(a); break;
     case 'close': closeSheet(); break;
+    case 'refresh': refreshAll(); break;
     case 'settings': S.tab = S.tab === 'settings' ? 'home' : 'settings'; window.scrollTo(0, 0); render(); break;
     case 'theme-toggle': ls.set('by.theme', isDark() ? 'light' : 'dark'); applyTheme(); render(); break;
     case 'theme': ls.set('by.theme', k); applyTheme(); render(); break;
@@ -1868,6 +1870,40 @@ function onInput(e) {
 document.addEventListener('click', e => { if (!e.target.closest('.sheet')) onClick(e); });
 document.addEventListener('change', e => { if (!e.target.closest('.sheet')) onChange(e); });
 document.addEventListener('input', e => { if (!e.target.closest('.sheet')) onInput(e); });
+
+
+/* ---------------- refresh: ↻ button and pull down ---------------- */
+async function refreshAll() {
+  if (S.refreshing) return;
+  S.refreshing = true; render();
+  try {
+    await checkForUpdate();                     // reloads the page if a newer Billy is published
+    if (S.demo) { await new Promise(r => setTimeout(r, 400)); toast('Sample data — nothing to sync'); }
+    else { await pull(true); ensureMonthly(); if (S.sync.state !== 'bad') toast('Up to date ✓'); }
+  } finally { S.refreshing = false; render(); }
+}
+(() => {
+  let y0 = null, dy = 0, el = null;
+  const ok = () => S.phase === 'ready' && !sheetEl && !document.querySelector('.viewer,.progress') && window.scrollY <= 0;
+  document.addEventListener('touchstart', e => { if (ok() && e.touches.length === 1) { y0 = e.touches[0].clientY; dy = 0; } else y0 = null; }, { passive: true });
+  document.addEventListener('touchmove', e => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy <= 0 || window.scrollY > 0) { el?.remove(); el = null; return; }
+    if (!el) { el = document.createElement('div'); el.className = 'ptr'; document.body.appendChild(el); }
+    const d = Math.min(dy, 130);
+    el.style.transform = `translate(-50%, ${d * 0.6}px) rotate(${d * 3}deg)`;
+    el.style.opacity = Math.min(1, d / 70);
+    el.classList.toggle('go', dy > 80);
+    el.textContent = '↻';
+  }, { passive: true });
+  document.addEventListener('touchend', () => {
+    if (y0 == null) return;
+    const go = dy > 80; y0 = null;
+    if (el) { const x = el; el = null; x.style.transition = 'transform .25s, opacity .25s'; x.style.opacity = 0; setTimeout(() => x.remove(), 260); }
+    if (go) refreshAll();
+  });
+})();
 
 /* ---------------- updates and start ---------------- */
 async function checkForUpdate() {
