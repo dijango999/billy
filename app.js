@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.5',
+  version: '1.6.6',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1282,7 +1282,7 @@ async function buildClaimFiles(id) {
     const pdf = await CLAIM.makeBillsPdf(entries, info, (k, n) => progress(`Making the bills PDF… ${k}/${n}`));
     progress('Making the Excel sheet…');
     const xlsx = await CLAIM.makeExcel(entries.map(e => ({
-      no: e.no, project: e.project, date: e.x.date, reason: e.x.sigma?.length ? `${plural(e.x.sigma.length, 'shoot day')} × ${money(+e.x.rate || 0)}: ${e.x.sigma.map(dayLine).join('; ')}` : e.reason, category: e.category, amount: +e.x.amount || 0,
+      no: e.no, project: e.project, date: e.x.date, reason: e.x.sigma?.length || e.x.days ? `${plural(e.x.sigma?.length || e.x.days, 'shoot day')} × ${money(+e.x.rate || 0)}` : e.reason, category: e.category, amount: +e.x.amount || 0,
       original: e.x.currency && e.x.currency !== base() && e.x.origAmount ? `${money(e.x.origAmount, e.x.currency)} @ ${e.x.fx}` : '',
       billPages: pdf.pages.get(e.no) || '',
     })), info);
