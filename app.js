@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.2.0',
+  version: '1.3.0',
 };
 const CANON = 'https://dijango999.github.io/billy/';
 const ON_SITE = location.hostname === 'dijango999.github.io';
@@ -676,6 +676,12 @@ function homeView() {
         <span class="amt">${moneyS(+x.amount || 0)}</span>
         <button class="chip good" data-a="confirm" data-id="${x.id}" style="border:0;padding:7px 11px;font-size:13px">✓</button></div>`).join('')}</div>
       ${pending.length > 1 ? `<button class="btn sec" data-a="confirm-all" style="margin-top:10px">✓ Confirm all ${pending.length} · ${moneyS(sum(pending))}</button>` : ''}</div>` : ''}
+    ${(() => { const k = new Date().getDate() <= 7 ? prevMonth(m) : m, have = sigmaFor(k);
+      return `<button class="claimcard" data-a="sigma" style="display:flex;gap:12px;align-items:center">
+        <span class="ic" style="background:var(--accSoft);font-size:20px">📅</span>
+        <span style="flex:1;min-width:0"><span class="ttl" style="display:block">Shoot days from Sigma</span>
+        <span class="small muted">${have ? `${monthLabel(k)}: ${plural(have.days || 0, 'day')} · ${moneyS(+have.amount || 0)} — tap to update` : `Add your ${monthLabel(k).split(' ')[0]} shoot days × ${moneyS(+st().dayRate || 150)}`}</span></span>
+        <span class="faint">›</span></button>`; })()}
     ${!learnedAny && !S.demo && ls.get('by.learnSkip') !== '1' ? `<div class="card" style="border-color:var(--acc)"><h3>🧠 Learn from your past sheets</h3>
       <div class="small muted">Billy can read the monthly expense sheets you sent before (in ${esc(PAST_FOLDER.split('/').slice(-2).join(' › '))}) to learn your projects, categories and the items that repeat every month or year.</div>
       <div class="actions"><button class="btn" data-a="learn">Read past sheets</button><button class="btn sec" data-a="learn-skip">Not now</button></div></div>` : ''}
@@ -772,7 +778,7 @@ function settingsView() {
       <div class="two"><label class="field"><span>Accountant</span><input data-set="accountant" value="${esc(s.accountant)}"></label>
       <label class="field"><span>Company</span><input data-set="company" value="${esc(s.company)}"></label></div>
       <label class="field"><span>Send claims to</span><input data-set="email" type="email" value="${esc(s.email)}"></label>
-      <div class="two"><label class="field"><span>Shoot day rate (${esc(base())})</span><input data-set="dayRate" inputmode="decimal" value="${esc(s.dayRate)}"></label>
+      <div class="two"><label class="field"><span>Shoot day allowance (${esc(base())} / day)</span><input data-set="dayRate" inputmode="decimal" value="${esc(s.dayRate)}"></label>
       <label class="field"><span>Currency</span><select data-set="currency">${CURRENCIES.map(c => `<option ${c === s.currency ? 'selected' : ''}>${c}</option>`).join('')}</select></label></div>
     </div>
     <div class="card"><h3>📧 Email to accounts</h3>
@@ -848,7 +854,9 @@ function openExpense(id) {
       ${x.days ? `<dt>Days</dt><dd>${x.days} × ${moneyS(+x.rate || 0)}</dd>` : ''}
       ${c ? `<dt>Claim</dt><dd>${esc(c.title)}</dd>` : ''}
       ${x.monthlyId ? `<dt>Repeats</dt><dd>${(t => t ? EVERY[+t.every || 1] : 'Yes')(S.data.monthly.find(t => t.id === x.monthlyId))}</dd>` : ''}
-    </dl>${x.reason ? `<div style="margin-top:12px;font-size:15px">${esc(x.reason)}</div>` : ''}</div>
+    </dl>${x.reason ? `<div style="margin-top:12px;font-size:15px">${esc(x.reason)}</div>` : ''}
+    ${x.sigma?.length ? `<div class="list" style="margin-top:10px">${x.sigma.map(d => `<div class="row" style="padding:9px 12px"><span class="main"><span class="t" style="font-size:14px">${esc(d.project)}</span><span class="s">${shortDate(d.date)}${d.note ? ' · ' + esc(d.note) : ''}</span></span></div>`).join('')}</div>
+      ${x.pending || ['sent', 'paid'].includes(s) ? '' : `<button class="btn sec" data-a="sigma" style="margin-top:8px">Update from Sigma</button>`}` : ''}</div>
     <div class="card"><h3>Bills</h3><div class="bills">
       ${x.bills.map((b, i) => `<button class="g" data-a="view-bill" data-id="${x.id}" data-i="${i}" style="${b.thumb ? `background-image:url('${tu(b.thumb)}')` : ''}">${b.thumb ? '' : `<span><span class="pdf">📄</span>${esc((b.ext || 'PDF').toUpperCase())}</span>`}</button>`).join('')}
       ${locked ? '' : `<label class="g add">＋ Add bill<input type="file" accept="image/*,application/pdf,.pdf,.heic" multiple hidden data-addbill="${x.id}"></label>`}
@@ -1037,6 +1045,86 @@ function openMonthly(id) {
     ${id ? `<button class="btn danger" data-a="monthly-del" data-id="${id}" style="margin-top:8px">Remove</button>` : ''}`);
 }
 
+
+/* ---------------- shoot days from Team Sigma ---------------- */
+const SIGMA_URL = 'https://sigma.choppershoot.com/';
+const lastDayOf = k => { const [y, m] = k.split('-').map(Number); return `${k}-${pad2(new Date(y, m, 0).getDate())}`; };
+const sigmaFor = k => S.data.expenses.find(x => x.sigmaMonth === k && !x.imported);
+const dayLine = d => `${parseDay(d.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })} ${d.project}${d.note ? ' (' + d.note + ')' : ''}`;
+function openSigma() {
+  S.sg = { days: null, file: null, month: '', sel: new Set(), rate: +st().dayRate || 150, err: '' };
+  openSheet('Shoot days from Sigma', sigmaHtml());
+}
+function sigmaHtml() {
+  const g = S.sg;
+  if (!g.days) return `
+    <div class="note" style="margin-top:12px">Billy counts your shoot days and adds them as one line: <b>shoot days × ${money(g.rate)}</b>, with every date and project listed for ${esc(firstName())}.</div>
+    <ol style="padding-left:20px;line-height:1.7;font-size:14.5px;margin-bottom:6px">
+      <li>Open <a href="${SIGMA_URL}" target="_blank" rel="noopener" style="color:var(--acc);font-weight:700">Team Sigma</a> → <b>My days</b> and pick the month.</li>
+      <li>Tap <b>Export Excel</b> at the bottom.</li>
+      <li>Choose that file here.</li>
+    </ol>
+    <label class="btn" style="margin-top:8px">📅 Choose the Sigma Excel file<input type="file" accept=".xlsx,.xls,.csv" hidden data-sigmafile></label>
+    ${g.err ? `<div class="note warn">${esc(g.err)}</div>` : ''}
+    <details style="margin-top:14px"><summary class="small muted" style="cursor:pointer">No file? Paste the My days page instead</summary>
+      <div class="small muted" style="margin-top:6px">On the My days page select everything (⌘A / long-press → Select All), copy, and paste it here.</div>
+      <textarea id="sgText" rows="5" style="width:100%;margin-top:8px;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--card)" placeholder="Paste here"></textarea>
+      <button class="btn sec" data-a="sg-read" style="margin-top:8px">Read the pasted page</button></details>`;
+  const months = [...new Set(g.days.map(d => mk(d.date)))].sort();
+  const list = g.days.filter(d => mk(d.date) === g.month);
+  const sel = list.filter(d => g.sel.has(d.date + d.project)), total = round2(sel.length * g.rate), had = sigmaFor(g.month);
+  const today = todayStr();
+  return `
+    ${months.length > 1 ? `<div class="months" style="margin-top:12px">${months.map(k => `<button data-a="sg-month" data-k="${k}" class="${g.month === k ? 'on' : ''}">${monthShort(k)}</button>`).join('')}</div>` : ''}
+    <div class="card" style="text-align:center"><div class="small muted">${monthLabel(g.month)} · ${plural(sel.length, 'shoot day')} × ${money(g.rate)}</div>
+      <div class="serif num" style="font-size:32px;font-weight:700;margin-top:4px">${money(total)}</div>
+      ${had ? `<div class="small" style="color:var(--warn);margin-top:4px">Replaces the ${monthShort(g.month)} shoot days already in Billy (${moneyS(+had.amount || 0)}).</div>` : ''}</div>
+    <div class="list">${list.map(d => { const k = d.date + d.project, on = g.sel.has(k); return `<button class="row ${on ? 'picked' : ''}" data-a="sg-day" data-k="${esc(k)}">
+      <span class="tick ${on ? 'on' : ''}">${on ? '✓' : ''}</span>
+      <span class="main"><span class="t">${esc(d.project)}</span><span class="s">${shortDate(d.date)}${d.note ? ' · ' + esc(d.note) : ''}${d.client ? ' · ' + esc(d.client) : ''}</span></span>
+      <span>${d.date > today ? '<span class="chip warn">Upcoming</span>' : d.wrapped === false ? '<span class="chip">Not wrapped</span>' : ''}</span></button>`; }).join('')}</div>
+    ${list.some(d => d.date > today) ? `<div class="small muted" style="margin-top:6px">Upcoming days are left out — tick them if they're done by the time you send.</div>` : ''}
+    <label class="field"><span>Rate per shoot day (${esc(base())})</span><input id="sgRate" inputmode="decimal" value="${esc(g.rate)}"></label>
+    <button class="btn" data-a="sg-add" style="margin-top:14px" ${sel.length ? '' : 'disabled'}>${had ? 'Update' : 'Add'} ${plural(sel.length, 'shoot day')} · ${money(total)}</button>
+    <button class="btn sec" data-a="sg-again" style="margin-top:8px">Choose a different file</button>`;
+}
+function sigmaLoaded(days, file) {
+  const g = S.sg;
+  if (!days.length) { g.err = 'No shoot days were found. Make sure it is the My days export from Sigma.'; g.days = null; redrawSheet(sigmaHtml()); return; }
+  const count = days.filter(SIGMA.counts), months = [...new Set(count.map(d => mk(d.date)))].sort();
+  const today = todayStr();
+  g.days = count; g.file = file; g.err = '';
+  g.month = months.includes(thisMonth()) ? thisMonth() : months[months.length - 1];
+  g.sel = new Set(count.filter(d => d.date <= today).map(d => d.date + d.project));
+  redrawSheet(sigmaHtml());
+}
+async function sigmaAdd(btn) {
+  const g = S.sg, rate = num($('#sgRate', sheetEl)?.value) || g.rate;
+  const days = g.days.filter(d => mk(d.date) === g.month && g.sel.has(d.date + d.project));
+  if (!days.length) return;
+  const old = sigmaFor(g.month);
+  if (old && ['sent', 'paid'].includes(status(old))) return toast(`${monthLabel(g.month)} shoot days were already sent to ${firstName()}.`);
+  btn.disabled = true; btn.innerHTML = '<span class="spin" style="width:16px;height:16px"></span>';
+  try {
+    const rec = { date: days[days.length - 1].date, projectId: null, label: 'Shoot Days', category: 'Shoot day allowance',
+      reason: `${plural(days.length, 'shoot day')} — ${monthLabel(g.month)} (Sigma)`, vendor: 'Team Sigma',
+      amount: round2(days.length * rate), currency: base(), origAmount: null, fx: null, days: days.length, rate, sigmaMonth: g.month,
+      sigma: days.map(d => ({ date: d.date, project: d.project, client: d.client, note: d.note })) };
+    const bills = [];
+    if (g.file) bills.push(await saveBill(g.file, rec));
+    await mutate(d => {
+      let x = d.expenses.find(e => e.sigmaMonth === rec.sigmaMonth && !e.imported);
+      if (!x) { x = { id: uuid(), bills: [], claimId: null, createdAt: isoNow() }; d.expenses.push(x); }
+      Object.assign(x, rec, { updatedAt: isoNow() });
+      x.bills = [...x.bills.filter(b => !/\.(xlsx|xls|csv)$/i.test(b.file)), ...bills];
+      if (x.claimId) { const c = d.claims.find(c => c.id === x.claimId); if (c && !c.sentAt) { c.stale = true; } }
+      d.settings.dayRate = rate;
+    });
+    if (old) for (const b of old.bills.filter(b => /\.(xlsx|xls|csv)$/i.test(b.file))) moveToRemoved('Bills/' + b.file);
+    closeSheet(); toast(`${plural(days.length, 'shoot day')} added · ${money(rec.amount)} ✓`);
+  } catch (e) { toast(e.message); btn.disabled = false; btn.textContent = 'Add'; }
+}
+
 /* ---------------- claims: make, build files, send ---------------- */
 function openNewClaim() {
   const open = openItems().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -1102,7 +1190,10 @@ async function buildClaimFiles(id) {
     for (const x of list) {
       i++;
       const files = [];
+      if (x.sigma?.length) files.push({ kind: 'list', title: `Shoot days from Team Sigma — ${monthLabel(x.sigmaMonth)}`, lines: x.sigma.map(d => `${shortDate(d.date)}   ${d.project}${d.note ? ' (' + d.note + ')' : ''}${d.client ? ' — ' + d.client : ''}`),
+        foot: `${plural(x.sigma.length, 'shoot day')} × ${money(+x.rate || 0)} = ${money(+x.amount || 0)}` });
       for (const b of x.bills) {
+        if (/^(xlsx|xls|csv)$/i.test(b.ext || b.file.split('.').pop())) continue;   // the Sigma export itself stays in OneDrive
         progress(`Collecting bills… ${i}/${list.length}`);
         try { files.push({ blob: await billBlob(b), ext: (b.ext || b.file.split('.').pop()).toLowerCase(), name: b.name }); } catch (e) { console.warn(e); files.push({ blob: new Blob([]), ext: 'bad', name: b.name }); }
       }
@@ -1113,7 +1204,7 @@ async function buildClaimFiles(id) {
     const pdf = await CLAIM.makeBillsPdf(entries, info, (k, n) => progress(`Making the bills PDF… ${k}/${n}`));
     progress('Making the Excel sheet…');
     const xlsx = await CLAIM.makeExcel(entries.map(e => ({
-      no: e.no, project: e.project, date: e.x.date, reason: e.reason, category: e.category, amount: +e.x.amount || 0,
+      no: e.no, project: e.project, date: e.x.date, reason: e.x.sigma?.length ? `${plural(e.x.sigma.length, 'shoot day')} × ${money(+e.x.rate || 0)}: ${e.x.sigma.map(dayLine).join('; ')}` : e.reason, category: e.category, amount: +e.x.amount || 0,
       original: e.x.currency && e.x.currency !== base() && e.x.origAmount ? `${money(e.x.origAmount, e.x.currency)} @ ${e.x.fx}` : '',
       billPages: pdf.pages.get(e.no) || '',
     })), info);
@@ -1517,11 +1608,11 @@ function sampleData() {
     E(`${m}-08`, dh, 'Fuel', 'Fuel for shoot day at Palm Jebel Ali', 128.4, 'ENOC'),
     E(`${m}-08`, dh, 'Food & meals', 'Lunch for crew (5)', 212, 'Al Mallah', false),
     E(`${m}-10`, dh, 'Parking & tolls', 'Parking at site', 40, 'Parkin'),
-    E(`${m}-11`, null, 'Shoot day allowance', '6 Days of Shoot', 300, '', false, { label: 'Shoot Days', days: 6, rate: 50 }),
+    
   ];
   const oldIds = ex.filter(x => x.claimId === oldClaim).map(x => x.id);
   return normalize({
-    settings: { name: 'Shaheer V', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 50, fromEmail: 'shaheer@choppershoot.com' },
+    settings: { name: 'Shaheer V', accountant: 'Adnan Ahmad', email: 'accounts@choppershoot.com', company: 'Choppershoot', currency: 'AED', dayRate: 150, fromEmail: 'shaheer@choppershoot.com' },
     projects: [dh, em, sr], monthly, expenses: ex,
     claims: [{ id: oldClaim, title: `Shaheer V ${monthLabel(pm)} Expenses`, month: pm, period: monthLabel(pm), expenseIds: oldIds, total: sum(ex.filter(x => oldIds.includes(x.id))),
       createdAt: `${m}-02T09:00:00Z`, sentAt: `${m}-02`, paidAt: null, folder: `${pm} demo`, files: null }],
@@ -1594,6 +1685,12 @@ async function onClick(e) {
     case 'claim-file': { const f = S.blobs[id] || await claimFiles(id).catch(err => { toast(err.message); return null; }); if (f) { k === 'pdf' ? viewBlob(f.pdf, f.pdf.name) : downloadFile(f.xlsx); } break; }
     case 'share-claim': await shareClaim(id); break;
     case 'send-open': openSend(null); break;
+    case 'sigma': closeSheet(true); openSigma(); break;
+    case 'sg-read': { const t = $('#sgText', sheetEl)?.value || ''; sigmaLoaded(SIGMA.fromText(t), null); break; }
+    case 'sg-month': S.sg.month = k; S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; redrawSheet(sigmaHtml()); break;
+    case 'sg-day': S.sg.rate = num($('#sgRate', sheetEl)?.value) || S.sg.rate; S.sg.sel.has(k) ? S.sg.sel.delete(k) : S.sg.sel.add(k); redrawSheet(sigmaHtml()); break;
+    case 'sg-add': await sigmaAdd(a); break;
+    case 'sg-again': S.sg.days = null; redrawSheet(sigmaHtml()); break;
     case 'send-claim': openSend(id); break;
     case 'send-now': await sendNow(a); break;
     case 'send-confirm-all': await mutateFast(d => { for (const x of d.expenses) delete x.pending; }); closeSheet(true); openSend(null); break;
@@ -1687,6 +1784,20 @@ async function onChange(e) {
     } catch (err) { toast(err.message); }
     return;
   }
+  if (t.matches('[data-sigmafile]') && t.files?.[0]) {
+    const f = t.files[0];
+    try {
+      let days;
+      if (/\.csv$/i.test(f.name)) days = SIGMA.fromText((await f.text()).split(/\r?\n/).map(l => l.split(',').join('\n')).join('\n'));
+      else {
+        const X = await LEARN.load(), wb = X.read(new Uint8Array(await f.arrayBuffer()), { type: 'array', cellDates: true });
+        days = []; for (const n of wb.SheetNames) days.push(...SIGMA.fromRows(X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null, blankrows: false })));
+      }
+      sigmaLoaded(days, f);
+    } catch (e) { S.sg.err = e.message; redrawSheet(sigmaHtml()); }
+    return;
+  }
+  if (t.matches('#sgRate')) { S.sg.rate = num(t.value) || S.sg.rate; redrawSheet(sigmaHtml()); return; }
   if (t.dataset.sgevery) { S.sugg.every[t.dataset.sgevery] = +t.value; redrawSheet(learnedHtml()); return; }
   if (t.dataset.sgnext) { S.sugg.next[t.dataset.sgnext] = t.value; return; }
   if (t.dataset.set) {

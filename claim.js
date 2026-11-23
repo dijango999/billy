@@ -146,6 +146,16 @@ const CLAIM = (() => {
       if (!e.files.length) { rowsOut.push([e, 'No bill']); continue; }
       const start = doc.getPageCount() + 1;
       for (const f of e.files) {
+        if (f.kind === 'list') {   // a page Billy writes itself, e.g. the shoot days from Sigma
+          let pg = doc.addPage(A4); headerOn(pg, e); let yy = A4[1] - HEAD - 40;
+          pg.drawText(fitText(bold, f.title, 14, A4[0] - 2 * M), { x: M, y: yy, size: 14, font: bold, color: inkC }); yy -= 26;
+          for (const ln of f.lines) {
+            if (yy < M + 40) { pg = doc.addPage(A4); headerOn(pg, e); yy = A4[1] - HEAD - 40; }
+            pg.drawText(fitText(font, ln, 10.5, A4[0] - 2 * M), { x: M, y: yy, size: 10.5, font, color: inkC }); yy -= 17;
+          }
+          if (f.foot) { yy -= 8; pg.drawText(fitText(bold, f.foot, 12, A4[0] - 2 * M), { x: M, y: yy, size: 12, font: bold, color: accC }); }
+          continue;
+        }
         try {
           if (f.ext === 'pdf') {
             const src = await PDFDocument.load(await f.blob.arrayBuffer(), { ignoreEncryption: true });

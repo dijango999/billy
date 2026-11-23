@@ -85,6 +85,6 @@ const LEARN = (() => {
     }
     return out;
   }
-  return { parse, findMonth };
+  return { parse, findMonth, load };
 })();
 if (typeof module !== 'undefined') module.exports = LEARN;
