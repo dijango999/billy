@@ -19,7 +19,7 @@ const CFG = {
   graph: 'https://graph.microsoft.com/v1.0',
   dataFile: 'billy.json',
   pointer: 'Apps/Billy/location.json',
-  version: '1.6.3',
+  version: '1.6.4',
   // Google sign-in for sending the claim from Gmail (project "Billy", send-only; public by design)
   googleClientId: '288267923011-egfmk477eq98e4im52cb07mro1o7f1a5.apps.googleusercontent.com',
 };
@@ -1962,7 +1962,7 @@ async function refreshAll() {
   if (S.refreshing) return;
   S.refreshing = true; render();
   try {
-    await checkForUpdate();                     // reloads the page if a newer Billy is published
+    await checkForUpdate(true);                 // reloads the page if a newer Billy is published
     if (S.demo) { await new Promise(r => setTimeout(r, 400)); toast('Sample data — nothing to sync'); }
     else { await pull(true); ensureMonthly(); await checkSigmaExports(true); if (S.sync.state !== 'bad') toast('Up to date ✓'); }
   } finally { S.refreshing = false; render(); }
@@ -1991,21 +1991,25 @@ async function refreshAll() {
 })();
 
 /* ---------------- updates and start ---------------- */
-async function checkForUpdate() {
+async function checkForUpdate(force) {
   if (location.protocol !== 'https:') return;
   try {
     const v = (await fetchJSON('version.json?t=' + Date.now(), 6000)).version;
-    if (v && v !== CFG.version && ls.get('by.updTried') !== v) {
-      ls.set('by.updTried', v);
-      try { const rs = await navigator.serviceWorker?.getRegistrations?.(); for (const r of rs || []) await r.update(); } catch {}
-      try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
-      location.reload();
-    }
+    if (!v || v === CFG.version) return;
+    // Don't loop if the new files aren't served yet (GitHub can take a minute): retry after 60 s, or at once when asked.
+    const [tv, at] = String(ls.get('by.updTried') || '').split('@');
+    if (!force && tv === v && Date.now() - (+at || 0) < 60000) return;
+    ls.set('by.updTried', `${v}@${Date.now()}`);
+    try { const rs = await navigator.serviceWorker?.getRegistrations?.(); for (const r of rs || []) await r.update(); } catch {}
+    try { for (const k of await caches.keys()) await caches.delete(k); } catch {}
+    try { await fetch('./?v=' + v, { cache: 'reload' }); await fetch('app.js?v=' + v, { cache: 'reload' }); } catch {}
+    location.replace(location.pathname + '?u=' + v);
   } catch {}
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
 
 async function boot() {
+  if (/[?&]u=/.test(location.search) && !/[?&](code|error)=/.test(location.search)) history.replaceState(null, '', location.pathname);
   applyTheme();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
   checkForUpdate();
